@@ -1,4 +1,35 @@
 {
   "schema_version": 1,
-  "components": []
+  "components": [
+    {
+      "id": "PY-CRYPTOGRAPHY",
+      "name": "cryptography",
+      "version": "50.0.1",
+      "scope": "build",
+      "status": "candidate",
+      "license": "Apache-2.0 OR BSD-3-Clause",
+      "pinned": false,
+      "notes": "Python FDX2/SPK1 reference codec and test vectors; lock commit/hash before release"
+    },
+    {
+      "id": "HOST-OPENSSL",
+      "name": "OpenSSL",
+      "version": "3.5.0",
+      "scope": "test",
+      "status": "candidate",
+      "license": "Apache-2.0",
+      "pinned": false,
+      "notes": "Host-only C++ vector reader; must never link into client artifacts"
+    },
+    {
+      "id": "ANDROID-BORINGSSL",
+      "name": "BoringSSL",
+      "version": "TBD",
+      "scope": "client",
+      "status": "candidate",
+      "license": "OpenSSL/ISC and third-party notices",
+      "pinned": false,
+      "notes": "P1 candidate for Android runtime crypto; pin commit and audit notices"
+    }
+  ]
 }

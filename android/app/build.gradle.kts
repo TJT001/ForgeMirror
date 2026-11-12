@@ -4,6 +4,7 @@ plugins {
 
 android {
     namespace = "dev.forgemirror.demo"
+    ndkVersion = "28.2.13676358"
     compileSdk {
         version = release(37)
     }
@@ -47,6 +48,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":shield"))
     implementation(libs.appcompat)
     implementation(libs.constraintlayout)
     implementation(libs.material)

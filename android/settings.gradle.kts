@@ -24,3 +24,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "ForgeMirror"
 include(":app")
+
+include(":shield")

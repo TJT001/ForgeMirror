@@ -1,0 +1,27 @@
+{
+  "build_id": "00112233445566778899aabbccddeeff",
+  "container_sha256": "3da7230b63475fa66f169919b526f681e562fe933b48de812e240acde0a572b5",
+  "files": [
+    {
+      "name": "classes.dex",
+      "sha256": "4a3c6c1cd56a98164ab187e1932f5cd1419c92c30fceab6ed233ad45620a64b5",
+      "size": 65792
+    },
+    {
+      "name": "classes2.dex",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "name": "classes3.dex",
+      "sha256": "c594666196a770de1dd61bca64c09439ff85e853be1e53152f22b75fedbe5ee4",
+      "size": 65537
+    }
+  ],
+  "format": "FDX2",
+  "k_content": "ff4ad31b429fc461ced46618681d55ca5548f03d819a6ebb9214f37418d91446",
+  "nonce_prefix": "0102030405060708",
+  "note": "public test vector; never use these keys in production",
+  "toc_nonce": "1112131415161718191a1b1c",
+  "version": 2
+}
