@@ -31,6 +31,7 @@ class AndroidTools:
     aapt2: Path
     apksigner: Path
     zipalign: Path
+    d8: Path
 
     @classmethod
     def discover(
@@ -55,18 +56,22 @@ class AndroidTools:
         aapt2 = tool_dir / "aapt2"
         apksigner = tool_dir / "apksigner"
         zipalign = tool_dir / "zipalign"
+        d8 = tool_dir / "d8"
         if not aapt2.is_file():
             raise ToolError(f"aapt2 not found at {aapt2}")
         if not apksigner.is_file():
             raise ToolError(f"apksigner not found at {apksigner}")
         if not zipalign.is_file():
             raise ToolError(f"zipalign not found at {zipalign}")
+        if not d8.is_file():
+            raise ToolError(f"d8 not found at {d8}")
         return cls(
             sdk_root=root,
             build_tools_version=tool_dir.name,
             aapt2=aapt2,
             apksigner=apksigner,
             zipalign=zipalign,
+            d8=d8,
         )
 
     def _run(self, arguments: list[str], timeout: int = 180, stderr_fallback: bool = False) -> str:
@@ -148,6 +153,40 @@ class AndroidTools:
 
     def verify(self, apk: Path) -> str:
         return self._run([str(self.apksigner), "verify", "--print-certs", str(apk)])
+
+    def _android_jar(self) -> Path:
+        platforms = self.sdk_root / "platforms"
+        if not platforms.is_dir():
+            raise ToolError(f"Android platforms not found under {self.sdk_root}")
+        candidates = sorted(
+            (path for path in platforms.iterdir() if path.is_dir()),
+            key=lambda path: [int(part) if part.isdigit() else part for part in re.split(r"[.-]", path.name)],
+        )
+        if not candidates:
+            raise ToolError(f"no Android platforms under {platforms}")
+        jar = candidates[-1] / "android.jar"
+        if not jar.is_file():
+            raise ToolError(f"android.jar not found at {jar}")
+        return jar
+
+    def dex_jar(self, jar: Path, out_dir: Path, min_api: int = 26) -> Path:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        self._run(
+            [
+                str(self.d8),
+                "--min-api",
+                str(min_api),
+                "--lib",
+                str(self._android_jar()),
+                "--output",
+                str(out_dir),
+                str(jar),
+            ]
+        )
+        dex = out_dir / "classes.dex"
+        if not dex.is_file():
+            raise ToolError(f"d8 did not produce {dex}")
+        return dex
 
     def tool_versions(self) -> dict[str, str]:
         versions: dict[str, str] = {"build-tools": self.build_tools_version}

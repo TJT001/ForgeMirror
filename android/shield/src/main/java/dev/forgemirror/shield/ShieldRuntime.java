@@ -1,7 +1,13 @@
 package dev.forgemirror.shield;
 
 import android.content.Context;
+import android.os.Debug;
+import android.os.SystemClock;
 import android.util.Log;
+
+import java.nio.ByteBuffer;
+
+import dalvik.system.InMemoryDexClassLoader;
 
 /**
  * P1-B stub runtime: verify the signed manifest, check protected artifacts, and
@@ -23,6 +29,10 @@ public final class ShieldRuntime {
     private static volatile int state = STATE_UNINITIALIZED;
     private static volatile String failure = "";
     private static volatile ShieldConfig config;
+    private static volatile ClassLoader memoryLoader;
+    private static volatile byte[][] dexBuffers;
+    private static volatile int dexCount;
+    private static volatile long decryptMs;
 
     static {
         System.loadLibrary("shield_boot");
@@ -51,6 +61,24 @@ public final class ShieldRuntime {
 
             // P1-B uses a local developer key path; key service is P2.
             state = STATE_KEY_READY;
+
+            if (config.key != null && !config.key.isEmpty()) {
+                long started = SystemClock.elapsedRealtimeNanos();
+                byte[] key = ShieldAssets.read(context, config.key);
+                byte[] container = ShieldAssets.read(context, config.container);
+                byte[][] dex = ShieldContainer.open(container, key);
+                ByteBuffer[] buffers = new ByteBuffer[dex.length];
+                for (int index = 0; index < dex.length; index++) {
+                    buffers[index] = ByteBuffer.wrap(dex[index]);
+                }
+                memoryLoader = new InMemoryDexClassLoader(
+                        buffers, ShieldRuntime.class.getClassLoader());
+                dexBuffers = dex;
+                dexCount = dex.length;
+                decryptMs = (SystemClock.elapsedRealtimeNanos() - started) / 1_000_000L;
+                Log.i(TAG, "dex loaded count=" + dexCount + " decryptMs=" + decryptMs
+                        + " pssKb=" + pssKb() + " " + ShieldArt.describe());
+            }
 
             int status = nativeBootstrap();
             if (status == FM_RECOVERY_REQUIRED) {
@@ -97,6 +125,26 @@ public final class ShieldRuntime {
 
     public static ShieldConfig getConfig() {
         return config;
+    }
+
+    public static ClassLoader getClassLoader() {
+        return memoryLoader;
+    }
+
+    public static int getDexCount() {
+        return dexCount;
+    }
+
+    public static long getDecryptMs() {
+        return decryptMs;
+    }
+
+    private static long pssKb() {
+        try {
+            return Debug.getPss();
+        } catch (Throwable ignored) {
+            return -1;
+        }
     }
 
     public static void markRunning() {

@@ -34,7 +34,11 @@ public final class ShieldApplication extends Application {
             return;
         }
         try {
-            Class<?> type = Class.forName(config.originalApplication, true, getClassLoader());
+            ClassLoader loader = ShieldRuntime.getClassLoader();
+            if (loader == null) {
+                loader = getClassLoader();
+            }
+            Class<?> type = Class.forName(config.originalApplication, true, loader);
             original = (Application) type.getDeclaredConstructor().newInstance();
             Method attach = ContextWrapper.class.getDeclaredMethod("attachBaseContext", Context.class);
             attach.setAccessible(true);

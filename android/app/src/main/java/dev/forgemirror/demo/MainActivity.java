@@ -1,33 +1,26 @@
 package dev.forgemirror.demo;
 
+import android.app.Activity;
 import android.content.Intent;
 import android.database.Cursor;
 import android.os.Bundle;
 import android.util.Log;
 import android.widget.TextView;
 
-import androidx.appcompat.app.AppCompatActivity;
-
-import dev.forgemirror.demo.databinding.ActivityMainBinding;
 import dev.forgemirror.shield.ShieldRuntime;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends Activity {
     private static final String TAG = "MainActivity";
 
-    // Used to load the 'demo' library on application startup.
-    static {
-        System.loadLibrary("demo");
-    }
-
-    private ActivityMainBinding binding;
     private boolean servicesStarted;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        binding = ActivityMainBinding.inflate(getLayoutInflater());
-        setContentView(binding.getRoot());
+        TextView tv = new TextView(this);
+        tv.setPadding(48, 96, 48, 48);
+        setContentView(tv);
         Log.i(TAG, "onCreate");
 
         HarnessStorage.exercise(this);
@@ -41,8 +34,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        TextView tv = binding.sampleText;
-        tv.setText(stringFromJNI() + "\n" + ShieldRuntime.describe() + "\n" + providerStatus);
+        tv.setText(ShieldRuntime.describe() + "\n" + providerStatus);
     }
 
     @Override
@@ -60,10 +52,4 @@ public class MainActivity extends AppCompatActivity {
             Log.w(TAG, "service start not allowed in current state", error);
         }
     }
-
-    /**
-     * A native method that is implemented by the 'demo' native library,
-     * which is packaged with this application.
-     */
-    public native String stringFromJNI();
 }
