@@ -28,6 +28,7 @@ public class MainActivity extends AppCompatActivity {
 
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
+        Log.i(TAG, "onCreate");
 
         HarnessStorage.exercise(this);
         sendBroadcast(new Intent(this, HarnessReceiver.class).setAction(HarnessReceiver.ACTION));
@@ -47,6 +48,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        Log.i(TAG, "onResume");
         if (servicesStarted) {
             return;
         }

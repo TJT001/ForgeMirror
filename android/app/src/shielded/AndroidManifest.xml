@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:name="dev.forgemirror.shield.ShieldApplication"
+        android:appComponentFactory="dev.forgemirror.shield.ShieldAppComponentFactory"
+        tools:replace="android:name,android:appComponentFactory">
+
+        <provider
+            android:name="dev.forgemirror.shield.ShieldProvider"
+            android:authorities="dev.forgemirror.demo.shield.bootstrap"
+            android:exported="false" />
+    </application>
+
+</manifest>

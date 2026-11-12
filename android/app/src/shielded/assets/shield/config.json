@@ -1,0 +1,9 @@
+{
+  "schema": "forgemirror.shield.config/1",
+  "original_application": "dev.forgemirror.demo.HarnessApplication",
+  "original_factory": "androidx.core.app.CoreComponentFactory",
+  "shell_version": "0.1.0",
+  "container": "assets/container.fdx",
+  "manifest": "shield/manifest.sig",
+  "trusted_key": "shield/trusted_key.der"
+}

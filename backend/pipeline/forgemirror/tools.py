@@ -30,6 +30,7 @@ class AndroidTools:
     build_tools_version: str
     aapt2: Path
     apksigner: Path
+    zipalign: Path
 
     @classmethod
     def discover(
@@ -53,15 +54,19 @@ class AndroidTools:
 
         aapt2 = tool_dir / "aapt2"
         apksigner = tool_dir / "apksigner"
+        zipalign = tool_dir / "zipalign"
         if not aapt2.is_file():
             raise ToolError(f"aapt2 not found at {aapt2}")
         if not apksigner.is_file():
             raise ToolError(f"apksigner not found at {apksigner}")
+        if not zipalign.is_file():
+            raise ToolError(f"zipalign not found at {zipalign}")
         return cls(
             sdk_root=root,
             build_tools_version=tool_dir.name,
             aapt2=aapt2,
             apksigner=apksigner,
+            zipalign=zipalign,
         )
 
     def _run(self, arguments: list[str], timeout: int = 180, stderr_fallback: bool = False) -> str:
@@ -105,6 +110,44 @@ class AndroidTools:
         if not match:
             return None
         return match.group(1).replace(":", "").lower()
+
+    def align_apk(self, apk_in: Path, apk_out: Path, alignment: int = 4) -> None:
+        self._run(
+            [
+                str(self.zipalign),
+                "-P",
+                "16",
+                "-f",
+                str(alignment),
+                str(apk_in),
+                str(apk_out),
+            ]
+        )
+
+    def sign_debug(self, apk_in: Path, apk_out: Path) -> None:
+        keystore = Path.home() / ".android" / "debug.keystore"
+        if not keystore.is_file():
+            raise ToolError(f"debug keystore not found at {keystore}")
+        self._run(
+            [
+                str(self.apksigner),
+                "sign",
+                "--ks",
+                str(keystore),
+                "--ks-pass",
+                "pass:android",
+                "--key-pass",
+                "pass:android",
+                "--ks-key-alias",
+                "androiddebugkey",
+                "--out",
+                str(apk_out),
+                str(apk_in),
+            ]
+        )
+
+    def verify(self, apk: Path) -> str:
+        return self._run([str(self.apksigner), "verify", "--print-certs", str(apk)])
 
     def tool_versions(self) -> dict[str, str]:
         versions: dict[str, str] = {"build-tools": self.build_tools_version}

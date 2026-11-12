@@ -82,6 +82,26 @@
 4. 校验 `app.cert_sha256` 与运行时证书一致。
 5. 版本三元组低于已记录值时，交由服务端防降级策略处理。
 
+## 5.1 P1-B 原型信封与算法协商
+
+P1-B 在 `assets/shield/manifest.sig` 中使用信封格式，避免运行时重新做 JSON 规范化：
+
+```json
+{
+  "alg": "ecdsa-p256-sha256",
+  "key_id": "p1b-dev",
+  "payload": "base64(canonical manifest JSON)",
+  "signature": "base64"
+}
+```
+
+- `payload` 是 §1 清单对象的规范化字节；签名直接覆盖这段字节。
+- 受信公钥以 DER SubjectPublicKeyInfo 放在 `assets/shield/trusted_key.der`。
+- `alg` 当前支持 `ecdsa-p256-sha256` 与 `ed25519`。
+- **P1-B 默认使用 ECDSA P-256**：Pixel 5 / API 30 的 Java 提供者没有 Ed25519/EdDSA KeyFactory，原型先用系统支持的算法验证链路。
+- Ed25519 仍是目标算法；P2 集成原生密码后端后切回，信封和 key_id 不需要改布局。
+- 运行时先验签，再解析 `payload`，最后逐产物校验 SHA-256；失败进入恢复流程。
+
 ## 6. 待冻结项
 
 - JCS 实现库与跨语言向量；

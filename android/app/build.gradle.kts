@@ -25,6 +25,12 @@ android {
     }
 
     buildTypes {
+        create("shielded") {
+            initWith(getByName("debug"))
+            isDebuggable = true
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("debug")
+        }
         release {
             optimization {
                 enable = true
