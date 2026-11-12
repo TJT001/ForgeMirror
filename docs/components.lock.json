@@ -30,6 +30,26 @@
       "license": "OpenSSL/ISC and third-party notices",
       "pinned": false,
       "notes": "P1 candidate for Android runtime crypto; pin commit and audit notices"
+    },
+    {
+      "id": "PY-PYDANTIC",
+      "name": "pydantic",
+      "version": "2.14.1",
+      "scope": "build",
+      "status": "candidate",
+      "license": "MIT",
+      "pinned": false,
+      "notes": "Stage output models; lock version before release"
+    },
+    {
+      "id": "PY-TYPER",
+      "name": "typer",
+      "version": "0.27.2",
+      "scope": "build",
+      "status": "candidate",
+      "license": "MIT",
+      "pinned": false,
+      "notes": "Pipeline CLI; lock version before release"
     }
   ]
 }

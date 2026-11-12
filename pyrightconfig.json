@@ -1,0 +1,6 @@
+{
+  "include": ["backend/pipeline/forgemirror", "backend/tests/pipeline"],
+  "extraPaths": ["backend/pipeline"],
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "basic"
+}
