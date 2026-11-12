@@ -1,17 +1,18 @@
 package dev.forgemirror.shield;
 
+import android.app.Activity;
 import android.content.Context;
+import android.content.ContextWrapper;
 import android.os.Debug;
 import android.os.SystemClock;
 import android.util.Log;
 
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 
-import dalvik.system.InMemoryDexClassLoader;
-
 /**
- * P1-B stub runtime: verify the signed manifest, check protected artifacts, and
- * bring up the native Core. DEX decryption/loading is P1-C.
+ * Shield runtime: verify the signed manifest, decrypt the FDX2 container into
+ * memory, and install the business class loader. See P1-B/C/C+ evidence.
  */
 public final class ShieldRuntime {
     public static final int STATE_UNINITIALIZED = 0;
@@ -71,8 +72,8 @@ public final class ShieldRuntime {
                 for (int index = 0; index < dex.length; index++) {
                     buffers[index] = ByteBuffer.wrap(dex[index]);
                 }
-                memoryLoader = new InMemoryDexClassLoader(
-                        buffers, ShieldRuntime.class.getClassLoader());
+                memoryLoader = new ShieldClassLoader(
+                        buffers, ShieldRuntime.class.getClassLoader(), context);
                 dexBuffers = dex;
                 dexCount = dex.length;
                 decryptMs = (SystemClock.elapsedRealtimeNanos() - started) / 1_000_000L;
@@ -144,6 +145,26 @@ public final class ShieldRuntime {
             return Debug.getPss();
         } catch (Throwable ignored) {
             return -1;
+        }
+    }
+
+    static void adaptActivity(Activity activity) {
+        ClassLoader memory = memoryLoader;
+        if (activity == null || memory == null) {
+            return;
+        }
+        try {
+            Context base = activity.getBaseContext();
+            if (base == null || base instanceof ShieldContextWrapper) {
+                return;
+            }
+            ShieldContextWrapper wrapper = new ShieldContextWrapper(base, memory);
+            Field baseField = ContextWrapper.class.getDeclaredField("mBase");
+            baseField.setAccessible(true);
+            baseField.set(activity, wrapper);
+            Log.i(TAG, "activity context adapted: " + activity.getClass().getName());
+        } catch (Throwable error) {
+            Log.w(TAG, "activity context adaptation failed", error);
         }
     }
 

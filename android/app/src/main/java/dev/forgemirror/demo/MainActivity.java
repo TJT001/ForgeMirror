@@ -1,26 +1,32 @@
 package dev.forgemirror.demo;
 
-import android.app.Activity;
 import android.content.Intent;
 import android.database.Cursor;
 import android.os.Bundle;
 import android.util.Log;
 import android.widget.TextView;
 
+import androidx.appcompat.app.AppCompatActivity;
+
+import dev.forgemirror.demo.databinding.ActivityMainBinding;
 import dev.forgemirror.shield.ShieldRuntime;
 
-public class MainActivity extends Activity {
+public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
 
+    static {
+        System.loadLibrary("demo");
+    }
+
+    private ActivityMainBinding binding;
     private boolean servicesStarted;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        TextView tv = new TextView(this);
-        tv.setPadding(48, 96, 48, 48);
-        setContentView(tv);
+        binding = ActivityMainBinding.inflate(getLayoutInflater());
+        setContentView(binding.getRoot());
         Log.i(TAG, "onCreate");
 
         HarnessStorage.exercise(this);
@@ -34,7 +40,17 @@ public class MainActivity extends Activity {
             }
         }
 
-        tv.setText(ShieldRuntime.describe() + "\n" + providerStatus);
+        String appStatus = "app=unknown";
+        try {
+            HarnessApplication app = (HarnessApplication) getApplication();
+            appStatus = "app=" + app.getClass().getSimpleName();
+        } catch (Throwable error) {
+            Log.w(TAG, "getApplication cast failed", error);
+            appStatus = "app=cast-failed";
+        }
+
+        TextView tv = binding.sampleText;
+        tv.setText(stringFromJNI() + "\n" + appStatus + "\n" + providerStatus);
     }
 
     @Override
@@ -52,4 +68,6 @@ public class MainActivity extends Activity {
             Log.w(TAG, "service start not allowed in current state", error);
         }
     }
+
+    public native String stringFromJNI();
 }

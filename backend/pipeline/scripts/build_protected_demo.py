@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "backend" / "pipeline"))
 
 from forgemirror.apk import parse_badging  # noqa: E402
-from forgemirror.formats.container import open_container  # noqa: E402
+from forgemirror.formats.container import FileSpec, open_container, write_container  # noqa: E402
 from forgemirror.s6 import (  # noqa: E402
     build_envelope,
     collect_artifacts,
@@ -81,6 +81,13 @@ def main() -> None:
         choices=("ecdsa-p256-sha256", "ed25519"),
     )
     parser.add_argument("--key-dir", type=Path, default=Path("artifacts/keys"))
+    parser.add_argument(
+        "--extra-dex",
+        type=Path,
+        action="append",
+        default=[],
+        help="additional DEX file to append to the container (repeatable)",
+    )
     parser.add_argument("--sdk-root", type=Path, default=None)
     parser.add_argument("--build-tools", default=None)
     args = parser.parse_args()
@@ -100,6 +107,37 @@ def main() -> None:
     opened = open_container(container, k_content=k_content)
     if not container.startswith(b"FDX2"):
         raise SystemExit("container does not start with FDX2")
+
+    import hashlib
+    import struct
+
+    with zipfile.ZipFile(args.apk) as archive:
+        base_specs = [
+            FileSpec(
+                name=info.filename,
+                data=archive.read(info.filename),
+            )
+            for info in archive.infolist()
+            if DEX_RE.match(info.filename) and not info.is_dir()
+        ]
+    extra_specs = [
+        FileSpec(name=f"stress{index}.dex", data=path.read_bytes())
+        for index, path in enumerate(args.extra_dex, start=1)
+    ]
+    if extra_specs:
+        build_id_bytes = struct.pack(
+            ">QQ",
+            int(args.build_id.replace("-", "")[:16], 16),
+            int(args.build_id.replace("-", "")[16:], 16),
+        )
+        reused_prefix = opened.header.nonce_prefix
+        container = write_container(
+            base_specs + extra_specs,
+            k_content=k_content,
+            build_id=build_id_bytes,
+            nonce_prefix=reused_prefix,
+        )
+        opened = open_container(container, k_content=k_content)
 
     signing_key = load_or_create_key(args.key_dir, args.alg)
     der = public_der(signing_key)
