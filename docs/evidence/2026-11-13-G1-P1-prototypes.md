@@ -7,7 +7,7 @@
 | P1-A 构建侧 S0–S2 | `2026-11-12-P1A.md`、`2026-11-13-P1-self-decrypt-core.md`、`2026-11-13-P1-dt-init-lzss.md` | 完成 |
 | P1-B 透明接管与恢复 | `2026-11-12-P1B.md`、`2026-11-13-P1-third-party-v2rayng.md` | 完成 |
 | P1-C 完整 DEX 加载 | `2026-11-12-P1C.md`、`2026-11-13-P1C-plus.md`、`2026-11-13-P1C-plus-round2.md` | 完成（C1–C5） |
-| P1-D 透明文件保护 | `2026-11-13-P1-transparent-io.md`、`2026-11-13-P1-D3-D5-C4-C5.md`、`2026-11-13-P1-journal-crash-recovery.md` | 完成（D1–D5） |
+| P1-D 透明文件保护 | `2026-11-13-P1-transparent-io.md`、`2026-11-13-P1-D3-D5-C4-C5.md`、`2026-11-13-P1-journal-crash-recovery.md`、`2026-11-13-P1-cross-process-merge.md`、`2026-11-13-P1-lock-interop.md` | 完成（D1–D5） |
 
 补充：`2026-11-13-P1-double-dynamic.md`、`2026-11-13-P1-self-decrypt-core.md`、
 `2026-11-13-P1-dt-init-lzss.md` 记录参考壳路线的静态对抗增强。
@@ -24,7 +24,7 @@
 | P1-D1–D2 | done | 策略通配/排除、SharedPreferences 适配 |
 | P1-D3 | done | open/read/write/pread/pwrite/lseek/close + dup/dup2/dup3；mmap/msync |
 | P1-D4 | done | 每文件 AEAD、逻辑偏移、原子迁移、排除直通 |
-| P1-D5 | done（原型级） | 截断、残留 tmp、并发锁、重命名、排除 SQLite；FMF2 增量 WAL、崩溃恢复与跨进程分块合并 |
+| P1-D5 | done（原型级） | 截断、残留 tmp、并发锁、重命名、排除 SQLite；FMF2 增量 WAL、崩溃恢复、跨进程分块合并与锁互操作 |
 | P1-E | done | API/worker/PostgreSQL/Vue/开发授权 |
 
 ## 设备矩阵
@@ -58,7 +58,7 @@ Demo harness 的 `firstFrameMs` 包含 3 秒探针 sleep，不计入基线。
 |---|---|---|
 | 崩溃恢复 | FMF2 已有增量 WAL + 前滚/回滚；旧 FMJ1 仅兼容；目录 fsync 尽力而为 | 掉电原子性未对所有 ROM 证明；`ShieldFiles` 已接入 FMF2/WAL |
 | 并发 | 跨进程已做分块三方合并；同块冲突 local-wins，块级非字节级；多写者仍由文件锁串行应用 WAL | 同块并发修改会丢弃远端版本；无分布式锁 |
-| 锁语义 | `flock/fcntl` 作用在 memfd，不与真实文件锁互通 | 依赖文件锁的 native 代码需适配 |
+| 锁语义 | `flock/fcntl` 已映射到真实目标 lock fd；同进程 POSIX fcntl 仍按内核语义不互斥 | 不覆盖直接 `svc`/`io_uring`；不与内部 `.lock` 声称互通 |
 | 系统调用 | 内联 `svc`、`io_uring` 未覆盖；`openat2.resolve` 未模拟 | 直接 syscall 可绕过透明 I/O |
 | ABI | x86/x86_64 无 ShadowHook 原生 hook；ARM32 未真机验证 | x86 透明 I/O/block 不可用 |
 | 加载器 | 未实现内存 ELF loader / safejni；core 用 FD + `android_dlopen_ext` | `/proc/self/fd` 可见 memfd |

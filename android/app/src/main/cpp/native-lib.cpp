@@ -3,6 +3,7 @@
 
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/file.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
@@ -188,6 +189,69 @@ Java_dev_forgemirror_demo_MainActivity_nativeProbeClose(
         jint fd) {
     (void) env;
     return close(fd) == 0 ? 0 : errno;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_dev_forgemirror_demo_MainActivity_nativeProbeLock(
+        JNIEnv* env,
+        jobject /* this */,
+        jstring path) {
+    const char* text = env->GetStringUTFChars(path, nullptr);
+    if (text == nullptr) {
+        return -1;
+    }
+    int first = open(text, O_RDWR);
+    int second = open(text, O_RDWR);
+    if (first < 0 || second < 0) {
+        if (first >= 0) close(first);
+        if (second >= 0) close(second);
+        env->ReleaseStringUTFChars(path, text);
+        return -1;
+    }
+    int flockFirst = ::flock(first, LOCK_EX | LOCK_NB);
+    errno = 0;
+    int flockSecond = ::flock(second, LOCK_EX | LOCK_NB);
+    int flockErr = flockSecond == 0 ? 0 : errno;
+    ::flock(first, LOCK_UN);
+    ::flock(second, LOCK_UN);
+
+    struct flock request{};
+    request.l_type = F_WRLCK;
+    request.l_whence = SEEK_SET;
+    request.l_start = 0;
+    request.l_len = 0;
+    int fcntlFirst = fcntl(first, F_SETLK, &request);
+    errno = 0;
+    int fcntlSecond = fcntl(second, F_SETLK, &request);
+    request.l_type = F_UNLCK;
+    fcntl(first, F_SETLK, &request);
+    fcntl(second, F_SETLK, &request);
+    int result = 0;
+    if (flockFirst != 0) {
+        result = 201;
+    } else if (fcntlFirst != 0) {
+        result = 202;
+    } else if (flockSecond == 0) {
+        result = 203;
+    }
+#ifdef F_OFD_SETLK
+    if (result == 0) {
+        request.l_type = F_WRLCK;
+        int ofdFirst = fcntl(first, F_OFD_SETLK, &request);
+        errno = 0;
+        int ofdSecond = fcntl(second, F_OFD_SETLK, &request);
+        request.l_type = F_UNLCK;
+        fcntl(first, F_OFD_SETLK, &request);
+        fcntl(second, F_OFD_SETLK, &request);
+        if (ofdFirst == 0 && ofdSecond == 0) {
+            result = 205;
+        }
+    }
+#endif
+    close(first);
+    close(second);
+    env->ReleaseStringUTFChars(path, text);
+    return result;
 }
 
 extern "C" JNIEXPORT jint JNICALL

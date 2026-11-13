@@ -21,6 +21,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -57,9 +58,18 @@ std::vector<ShadowMap> gShadowMaps;
 std::mutex gDirtyLock;
 std::unordered_set<int> gDirtyFds;
 std::atomic<bool> gSchedulerStarted{false};
+std::unordered_map<int, int> gLockFds;
+std::unordered_map<int, int> gLockRefs;
+std::mutex gLockFdLock;
 
 bool is_covered(const char *path);
 bool deny_now();
+bool fd_covered(int fd, std::string *path);
+void remember_fd(int fd, const char *path);
+
+int lock_fd_for(int fd, int *created);
+void release_lock_fd(int fd);
+void retain_lock_dup(int oldfd, int newfd);
 void java_sync_shadow(int fd, bool close);
 bool write_flags(int flags);
 
@@ -72,6 +82,8 @@ using close_t = int (*)(int);
 using dup_t = int (*)(int);
 using dup2_t = int (*)(int, int);
 using dup3_t = int (*)(int, int, int);
+using flock_t = int (*)(int, int);
+using fcntl_t = int (*)(int, int, ...);
 using rename_t = int (*)(const char *, const char *);
 using renameat_t = int (*)(int, const char *, int, const char *);
 using unlink_t = int (*)(const char *);
@@ -101,6 +113,8 @@ close_t g_close = nullptr;
 dup_t g_dup = nullptr;
 dup2_t g_dup2 = nullptr;
 dup3_t g_dup3 = nullptr;
+flock_t g_flock = nullptr;
+__attribute__((unused)) fcntl_t g_fcntl = nullptr;
 rename_t g_rename = nullptr;
 renameat_t g_renameat = nullptr;
 unlink_t g_unlink = nullptr;
@@ -367,6 +381,7 @@ int try_shadow_open(const char *path, int flags) {
         }
     }
     remember_shadow(fd);
+    remember_fd(fd, path);
     return fd;
 }
 
@@ -459,6 +474,124 @@ bool fd_covered(int fd, std::string *path) {
     }
     *path = gFdPaths[fd];
     return true;
+}
+
+void raw_close_fd(int fd) {
+    if (fd < 0) {
+        return;
+    }
+    bool previous = gInternal;
+    gInternal = true;
+    ::close(fd);
+    gInternal = previous;
+}
+
+int raw_open_path(const char *path, int flags) {
+    if (path == nullptr) {
+        return -1;
+    }
+    bool previous = gInternal;
+    gInternal = true;
+    int fd = ::open(path, flags | O_CLOEXEC);
+    if (fd < 0) {
+        fd = ::open(path, O_RDONLY | O_CLOEXEC);
+    }
+    gInternal = previous;
+    return fd;
+}
+
+int lock_fd_for(int fd, int *created) {
+    std::string path;
+    if (!fd_covered(fd, &path)) {
+        return -1;
+    }
+    {
+        std::lock_guard<std::mutex> guard(gLockFdLock);
+        auto existing = gLockFds.find(fd);
+        if (existing != gLockFds.end()) {
+            if (created != nullptr) {
+                *created = 0;
+            }
+            return existing->second;
+        }
+    }
+    int lockFd = raw_open_path(path.c_str(), O_RDWR);
+    if (lockFd < 0) {
+        return -1;
+    }
+    int result = lockFd;
+    int discard = -1;
+    {
+        std::lock_guard<std::mutex> guard(gLockFdLock);
+        auto existing = gLockFds.find(fd);
+        if (existing != gLockFds.end()) {
+            discard = lockFd;
+            result = existing->second;
+        } else {
+            gLockFds[fd] = lockFd;
+            gLockRefs[lockFd] = gLockRefs[lockFd] + 1;
+        }
+    }
+    if (discard >= 0) {
+        raw_close_fd(discard);
+    }
+    if (created != nullptr) {
+        *created = discard >= 0 ? 0 : 1;
+    }
+    return result;
+}
+
+void release_lock_fd(int fd) {
+    int closeFd = -1;
+    {
+        std::lock_guard<std::mutex> guard(gLockFdLock);
+        auto existing = gLockFds.find(fd);
+        if (existing == gLockFds.end()) {
+            return;
+        }
+        int lockFd = existing->second;
+        gLockFds.erase(existing);
+        int refs = gLockRefs[lockFd] - 1;
+        if (refs <= 0) {
+            gLockRefs.erase(lockFd);
+            closeFd = lockFd;
+        } else {
+            gLockRefs[lockFd] = refs;
+        }
+    }
+    if (closeFd >= 0) {
+        raw_close_fd(closeFd);
+    }
+}
+
+void retain_lock_dup(int oldfd, int newfd) {
+    int oldLock = -1;
+    int closeFd = -1;
+    {
+        std::lock_guard<std::mutex> guard(gLockFdLock);
+        auto oldEntry = gLockFds.find(oldfd);
+        if (oldEntry == gLockFds.end()) {
+            return;
+        }
+        oldLock = oldEntry->second;
+        auto newEntry = gLockFds.find(newfd);
+        if (newEntry != gLockFds.end()) {
+            int previous = newEntry->second;
+            gLockFds.erase(newEntry);
+            int refs = gLockRefs[previous] - 1;
+            if (refs <= 0) {
+                gLockRefs.erase(previous);
+                closeFd = previous;
+            } else {
+                gLockRefs[previous] = refs;
+            }
+        }
+        gLockFds[newfd] = oldLock;
+        gLockRefs[oldLock] = gLockRefs[oldLock] + 1;
+    }
+    if (closeFd >= 0) {
+        raw_close_fd(closeFd);
+    }
 }
 
 bool write_flags(int flags) {
@@ -899,6 +1032,7 @@ int proxy_dup(int oldfd) {
     if (result >= 0 && is_shadow(oldfd)) {
         remember_shadow(result);
         java_remember_dup(oldfd, result);
+        retain_lock_dup(oldfd, result);
     }
     return result;
 }
@@ -913,10 +1047,12 @@ int proxy_dup2(int oldfd, int newfd) {
         if (newShadow && !(oldShadow && oldfd == newfd)) {
             forget_shadow(newfd);
             java_forget_dup(newfd);
+            release_lock_fd(newfd);
         }
         if (oldShadow && oldfd != newfd) {
             remember_shadow(newfd);
             java_remember_dup(oldfd, newfd);
+            retain_lock_dup(oldfd, newfd);
         }
     }
     return result;
@@ -932,17 +1068,136 @@ int proxy_dup3(int oldfd, int newfd, int flags) {
         if (newShadow) {
             forget_shadow(newfd);
             java_forget_dup(newfd);
+            release_lock_fd(newfd);
         }
         if (oldShadow) {
             remember_shadow(newfd);
             java_remember_dup(oldfd, newfd);
+            retain_lock_dup(oldfd, newfd);
         }
     }
     return result;
 }
 
+bool fcntl_no_arg(int command) {
+    switch (command) {
+        case F_GETFD:
+        case F_GETFL:
+        case F_GETOWN:
+        case F_GETSIG:
+#ifdef F_GETLEASE
+        case F_GETLEASE:
+#endif
+#ifdef F_GETPIPE_SZ
+        case F_GETPIPE_SZ:
+#endif
+#ifdef F_GET_SEALS
+        case F_GET_SEALS:
+#endif
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool fcntl_int_arg(int command) {
+    switch (command) {
+        case F_SETFD:
+        case F_SETFL:
+        case F_SETOWN:
+        case F_SETSIG:
+        case F_DUPFD:
+#ifdef F_DUPFD_CLOEXEC
+        case F_DUPFD_CLOEXEC:
+#endif
+#ifdef F_SETLEASE
+        case F_SETLEASE:
+#endif
+#ifdef F_NOTIFY
+        case F_NOTIFY:
+#endif
+#ifdef F_SETPIPE_SZ
+        case F_SETPIPE_SZ:
+#endif
+#ifdef F_ADD_SEALS
+        case F_ADD_SEALS:
+#endif
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool fcntl_lock_command(int command) {
+    if (command == F_GETLK || command == F_SETLK || command == F_SETLKW) {
+        return true;
+    }
+#ifdef F_OFD_GETLK
+    if (command == F_OFD_GETLK || command == F_OFD_SETLK
+            || command == F_OFD_SETLKW) {
+        return true;
+    }
+#endif
+    return false;
+}
+
+int proxy_flock(int fd, int operation) {
+    SHADOWHOOK_STACK_SCOPE();
+    auto prev = (flock_t) shadowhook_get_prev_func((void *) &proxy_flock);
+    if (prev == nullptr) {
+        return -1;
+    }
+    if (is_shadow(fd)) {
+        int lockFd = lock_fd_for(fd, nullptr);
+        if (lockFd >= 0) {
+            return prev(lockFd, operation);
+        }
+    }
+    return prev(fd, operation);
+}
+
+__attribute__((unused)) int proxy_fcntl(int fd, int command, ...) {
+    SHADOWHOOK_STACK_SCOPE();
+    auto prev = (fcntl_t) shadowhook_get_prev_func((void *) &proxy_fcntl);
+    if (prev == nullptr) {
+        return -1;
+    }
+    va_list arguments;
+    va_start(arguments, command);
+    bool shadow = is_shadow(fd);
+    int result;
+    if (shadow && fcntl_lock_command(command)) {
+        struct flock *lock = va_arg(arguments, struct flock *);
+        int lockFd = lock_fd_for(fd, nullptr);
+        result = prev(lockFd >= 0 ? lockFd : fd, command, lock);
+    } else if (shadow && (command == F_DUPFD
+#ifdef F_DUPFD_CLOEXEC
+            || command == F_DUPFD_CLOEXEC
+#endif
+    )) {
+        int minimum = va_arg(arguments, int);
+        result = prev(fd, command, minimum);
+        if (result >= 0) {
+            remember_shadow(result);
+            java_remember_dup(fd, result);
+            retain_lock_dup(fd, result);
+        }
+    } else if (fcntl_no_arg(command)) {
+        result = prev(fd, command);
+    } else if (fcntl_int_arg(command)) {
+        int value = va_arg(arguments, int);
+        result = prev(fd, command, value);
+    } else {
+        void *value = va_arg(arguments, void *);
+        result = prev(fd, command, value);
+    }
+    va_end(arguments);
+    return result;
+}
+
 int proxy_close(int fd) {
     SHADOWHOOK_STACK_SCOPE();
+    release_lock_fd(fd);
     if (!gInternal && is_shadow(fd)) {
         java_sync_shadow(fd, true);
         forget_shadow(fd);
@@ -1065,7 +1320,9 @@ void *proxy_mmap64(void *addr, size_t length, int prot, int flags, int fd, off64
 }
 
 template <typename T>
-int hook_one(const char *lib, const char *symbol, void *replacement) {
+int hook_one(const char *lib, const char *symbol, void *replacement,
+             T *original) {
+    (void) original;
     void *stub = shadowhook_hook_sym_name(lib, symbol, replacement, nullptr);
     if (stub != nullptr) {
         __android_log_print(ANDROID_LOG_INFO, kTag, "hook %s in %s ok", symbol, lib);
@@ -1076,7 +1333,6 @@ int hook_one(const char *lib, const char *symbol, void *replacement) {
 
 template <typename T>
 void hook(const char *symbol, void *replacement, T *original) {
-    (void) original;
     int installed = 0;
     const char *libs[] = {
         "libc.so",
@@ -1086,7 +1342,7 @@ void hook(const char *symbol, void *replacement, T *original) {
         "/apex/com.android.runtime/lib/bionic/libc.so",
     };
     for (const char *lib : libs) {
-        installed += hook_one<T>(lib, symbol, replacement);
+        installed += hook_one<T>(lib, symbol, replacement, original);
     }
     if (installed == 0) {
         __android_log_print(ANDROID_LOG_WARN, kTag, "hook %s failed", symbol);
@@ -1112,6 +1368,8 @@ void install() {
     hook("dup", reinterpret_cast<void *>(&proxy_dup), &g_dup);
     hook("dup2", reinterpret_cast<void *>(&proxy_dup2), &g_dup2);
     hook("dup3", reinterpret_cast<void *>(&proxy_dup3), &g_dup3);
+    hook("flock", reinterpret_cast<void *>(&proxy_flock), &g_flock);
+    hook("fcntl", reinterpret_cast<void *>(&proxy_fcntl), &g_fcntl);
     hook("rename", reinterpret_cast<void *>(&proxy_rename), &g_rename);
     hook("renameat", reinterpret_cast<void *>(&proxy_renameat), &g_renameat);
     hook("unlink", reinterpret_cast<void *>(&proxy_unlink), &g_unlink);

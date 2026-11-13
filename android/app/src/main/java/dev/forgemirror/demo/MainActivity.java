@@ -60,6 +60,7 @@ public class MainActivity extends AppCompatActivity {
         String javaText = HarnessStorage.readRandomText(this);
         int mmapWriteErr = nativeProbeMmapWrite(probeFile, "M2XYZ6");
         String javaMmap = HarnessStorage.readRandomText(this);
+        int lockErr = nativeProbeLock(probeFile);
         int dupWriteErr = nativeProbeDupWrite(probeFile, "D2XYZ6");
         String javaDup = HarnessStorage.readRandomText(this);
         startMergeProbe();
@@ -78,7 +79,8 @@ public class MainActivity extends AppCompatActivity {
                 + " textErr=" + textWriteErr + " native=" + nativeText
                 + " java=" + javaText + " mmapWriteErr=" + mmapWriteErr
                 + " javaMmap=" + javaMmap + " periodic=" + periodic
-                + " dupErr=" + dupWriteErr + " javaDup=" + javaDup;
+                + " dupErr=" + dupWriteErr + " javaDup=" + javaDup
+                + " lockErr=" + lockErr;
         tv.setText(stringFromJNI() + "\n" + appStatus + "\n" + providerStatus
                 + "\n" + HarnessStorage.verify(this) + "\n" + probe);
     }
@@ -170,6 +172,8 @@ public class MainActivity extends AppCompatActivity {
     public native int nativeProbeHoldWrite(String path, String value, int millis);
 
     public native int nativeProbeDupWrite(String path, String value);
+
+    public native int nativeProbeLock(String path);
 
     public native int nativeProbeOpenMerge(String path);
 
