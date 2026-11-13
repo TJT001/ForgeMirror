@@ -11,11 +11,13 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
 import java.util.Arrays;
 
 public final class ShieldChunkStoreTest {
@@ -260,6 +262,109 @@ public final class ShieldChunkStoreTest {
         Files.move(file.toPath(), renamed.toPath(),
                 StandardCopyOption.ATOMIC_MOVE);
         assertArrayEquals(data, readAll(renamed));
+    }
+
+    @Test
+    public void committedJournalReplaysPreparedImage() throws Exception {
+        File target = new File(folder.getRoot(), "journal.bin");
+        byte[] first = pattern(8000, 21);
+        try (ShieldChunkStore store = ShieldChunkStore.open(target, KEY, "rw")) {
+            writeBlocks(store, first);
+        }
+        File prepared = new File(folder.getRoot(), "prepared.bin");
+        byte[] second = pattern(12000, 22);
+        try (ShieldChunkStore store = ShieldChunkStore.open(prepared, KEY, "rw")) {
+            writeBlocks(store, second);
+        }
+        File image = new File(folder.getRoot(), "journal.bin.fmf2.tmp");
+        Files.copy(prepared.toPath(), image.toPath(),
+                StandardCopyOption.REPLACE_EXISTING);
+        ShieldChunkStore.writeCommitFile(target, image.length(), second.length,
+                new byte[16], digest(image));
+        assertArrayEquals(second, readAll(target));
+        assertFalse(image.isFile());
+        assertFalse(new File(folder.getRoot(), "journal.bin.fmf2.commit").isFile());
+    }
+
+    @Test
+    public void readOnlyOpenReplaysCommittedJournal() throws Exception {
+        File target = new File(folder.getRoot(), "readonly-journal.bin");
+        byte[] first = pattern(2000, 27);
+        try (ShieldChunkStore store = ShieldChunkStore.open(target, KEY, "rw")) {
+            writeBlocks(store, first);
+        }
+        File prepared = new File(folder.getRoot(), "readonly-prepared.bin");
+        byte[] second = pattern(3000, 28);
+        try (ShieldChunkStore store = ShieldChunkStore.open(prepared, KEY, "rw")) {
+            writeBlocks(store, second);
+        }
+        File image = new File(folder.getRoot(), "readonly-journal.bin.fmf2.tmp");
+        Files.copy(prepared.toPath(), image.toPath(),
+                StandardCopyOption.REPLACE_EXISTING);
+        ShieldChunkStore.writeCommitFile(target, image.length(), second.length,
+                new byte[16], digest(image));
+        assertArrayEquals(second, readAll(target));
+        assertFalse(image.isFile());
+    }
+
+    @Test
+    public void appliedJournalIsCleanedWithoutReplay() throws Exception {
+        File target = new File(folder.getRoot(), "applied.bin");
+        byte[] data = pattern(4000, 23);
+        try (ShieldChunkStore store = ShieldChunkStore.open(target, KEY, "rw")) {
+            writeBlocks(store, data);
+        }
+        ShieldChunkStore.writeCommitFile(target, target.length(), data.length,
+                new byte[16], digest(target));
+        assertArrayEquals(data, readAll(target));
+        assertFalse(new File(folder.getRoot(), "applied.bin.fmf2.commit").isFile());
+    }
+
+    @Test
+    public void truncatedJournalImageRollsBack() throws Exception {
+        File target = new File(folder.getRoot(), "rollback.bin");
+        byte[] data = pattern(3000, 24);
+        try (ShieldChunkStore store = ShieldChunkStore.open(target, KEY, "rw")) {
+            writeBlocks(store, data);
+        }
+        File image = new File(folder.getRoot(), "rollback.bin.fmf2.tmp");
+        try (FileOutputStream out = new FileOutputStream(image)) {
+            out.write(pattern(100, 25));
+        }
+        ShieldChunkStore.writeCommitFile(target, image.length(), 3000,
+                new byte[16], digest(image));
+        assertArrayEquals(data, readAll(target));
+        assertFalse(image.isFile());
+        assertFalse(new File(folder.getRoot(), "rollback.bin.fmf2.commit").isFile());
+    }
+
+    @Test
+    public void malformedJournalIsIgnored() throws Exception {
+        File target = new File(folder.getRoot(), "malformed.bin");
+        byte[] data = pattern(2500, 26);
+        try (ShieldChunkStore store = ShieldChunkStore.open(target, KEY, "rw")) {
+            writeBlocks(store, data);
+        }
+        File commit = new File(folder.getRoot(), "malformed.bin.fmf2.commit");
+        try (FileOutputStream out = new FileOutputStream(commit)) {
+            out.write(new byte[]{1, 2, 3});
+        }
+        assertArrayEquals(data, readAll(target));
+        assertFalse(commit.isFile());
+    }
+
+    private static byte[] digest(File file) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        try (FileInputStream input = new FileInputStream(file)) {
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) >= 0) {
+                if (read > 0) {
+                    digest.update(buffer, 0, read);
+                }
+            }
+        }
+        return digest.digest();
     }
 
     @Test

@@ -149,6 +149,7 @@ final class ShieldFiles {
         private final File target;
         private final byte[] key;
         private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        private boolean closed;
 
         ShieldFileOutputStream(File target, byte[] key, boolean append) throws IOException {
             super(new File(target.getParentFile(), target.getName() + ".tmp"));
@@ -196,7 +197,11 @@ final class ShieldFiles {
         }
 
         @Override
-        public void close() throws IOException {
+        public synchronized void close() throws IOException {
+            if (closed) {
+                return;
+            }
+            closed = true;
             if (buffer.size() > MAX_BUFFER) {
                 throw new IOException("encrypted file too large for in-memory buffer");
             }

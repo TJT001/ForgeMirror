@@ -1,8 +1,10 @@
 package dev.forgemirror.shield;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -11,6 +13,8 @@ import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -25,7 +29,10 @@ import java.util.Map;
  */
 final class ShieldChunkStore implements AutoCloseable {
     static final byte[] MAGIC = {'F', 'M', 'F', '2'};
+    static final byte[] JOURNAL_MAGIC = {'F', 'M', 'J', '1'};
     static final int VERSION = 2;
+    static final int JOURNAL_VERSION = 1;
+    static final int JOURNAL_SIZE = 112;
     static final int HEADER_SIZE = 72;
     static final int DEFAULT_CHUNK_SIZE = 65536;
     static final int NONCE_SIZE = 12;
@@ -123,16 +130,16 @@ final class ShieldChunkStore implements AutoCloseable {
                 && !"rws".equals(mode) && !"rwd".equals(mode)) {
             throw new IllegalArgumentException("unsupported mode: " + mode);
         }
-        if (!writable && !target.isFile()) {
-            throw new FileNotFoundException(target.getPath());
-        }
         File parent = target.getParentFile();
         if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
             throw new IOException("cannot create " + parent);
         }
         acquireLock();
         try {
-            deleteStaleTemp(target);
+            recover(target);
+            if (!writable && !target.isFile()) {
+                throw new FileNotFoundException(target.getPath());
+            }
             if (!blank && target.isFile() && target.length() > 0) {
                 source = new RandomAccessFile(target, writable ? "rw" : "r");
                 readHeader();
@@ -318,10 +325,18 @@ final class ShieldChunkStore implements AutoCloseable {
             throw new IOException("cannot create " + parent);
         }
         File temp = temp(target);
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (Exception error) {
+            throw new IOException("SHA-256 unavailable", error);
+        }
+        long imageLength;
         try (RandomAccessFile output = new RandomAccessFile(temp, "rw")) {
             output.setLength(0);
             byte[] header = buildHeader();
             output.write(header);
+            digest.update(header);
             for (int index = 0; index < chunkCount; index++) {
                 int chunkLength = chunkLength(index);
                 boolean copyable = !dirty.containsKey(index)
@@ -329,7 +344,7 @@ final class ShieldChunkStore implements AutoCloseable {
                         && chunkLength == persistedChunkLength(index)
                         && (long) index * chunkSize < zeroFrom;
                 if (copyable) {
-                    copyRecord(output, index);
+                    copyRecord(output, index, digest);
                     continue;
                 }
                 byte[] chunk = dirty.get(index);
@@ -342,26 +357,42 @@ final class ShieldChunkStore implements AutoCloseable {
                 byte[] ciphertext = ShieldCrypto.gcmEncrypt(
                         key, nonce, padded, chunkAad(index, chunkLength));
                 output.write(nonce);
+                digest.update(nonce);
                 output.write(ciphertext);
+                digest.update(ciphertext);
             }
             output.getFD().sync();
+            imageLength = output.length();
         } catch (Exception error) {
             //noinspection ResultOfMethodCallIgnored
             temp.delete();
             throw new IOException("FMF2 persist failed: " + target, error);
+        }
+        File commit = commit(target);
+        try {
+            writeCommitFile(target, imageLength, length, fileId, digest.digest());
+        } catch (Exception error) {
+            //noinspection ResultOfMethodCallIgnored
+            temp.delete();
+            //noinspection ResultOfMethodCallIgnored
+            commitTemp(target).delete();
+            throw new IOException("FMF2 journal failed: " + target, error);
         }
         if (source != null) {
             source.close();
             source = null;
         }
         try {
-            Files.move(temp.toPath(), target.toPath(),
-                    StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            moveAtomic(temp, target);
         } catch (IOException moveFailure) {
-            if (!temp.renameTo(target)) {
-                throw new IOException("atomic move failed: " + target, moveFailure);
-            }
+            // The commit record is durable; the next open replays the image.
+            throw new IOException("atomic move failed: " + target, moveFailure);
         }
+        fsyncDirectory(parent);
+        if (commit.exists() && !commit.delete()) {
+            // Recovery will notice the target already carries this image.
+        }
+        fsyncDirectory(parent);
         dirty.clear();
         persistedCount = chunkCount;
         persistedLength = length;
@@ -369,7 +400,200 @@ final class ShieldChunkStore implements AutoCloseable {
         changed = false;
     }
 
-    private void copyRecord(RandomAccessFile output, int index) throws IOException {
+    private static void moveAtomic(File source, File target) throws IOException {
+        try {
+            Files.move(source.toPath(), target.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException moveFailure) {
+            if (!source.renameTo(target)) {
+                throw moveFailure;
+            }
+        }
+    }
+
+    private void recover(File target) throws IOException {
+        File commit = commit(target);
+        File image = temp(target);
+        if (commit.isFile()) {
+            CommitInfo info = readCommit(commit);
+            if (info != null) {
+                if (image.isFile() && hasMagic(image)
+                        && image.length() == info.imageLength
+                        && Arrays.equals(sha256(image), info.digest)) {
+                    moveAtomic(image, target);
+                    fsyncDirectory(target.getParentFile());
+                    deleteQuietly(commit);
+                    fsyncDirectory(target.getParentFile());
+                    return;
+                }
+                if (target.isFile() && hasMagic(target)
+                        && target.length() == info.imageLength
+                        && Arrays.equals(sha256(target), info.digest)) {
+                    deleteQuietly(image);
+                    deleteQuietly(commit);
+                    fsyncDirectory(target.getParentFile());
+                    return;
+                }
+            }
+            // No usable image or already-applied target: roll the journal back.
+            deleteQuietly(commit);
+            deleteQuietly(image);
+            fsyncDirectory(target.getParentFile());
+        }
+        deleteStaleTemp(target);
+        deleteQuietly(commitTemp(target));
+    }
+
+    private static CommitInfo readCommit(File commit) {
+        if (commit.length() != JOURNAL_SIZE) {
+            return null;
+        }
+        try (InputStream input = new FileInputStream(commit)) {
+            byte[] data = new byte[JOURNAL_SIZE];
+            int offset = 0;
+            while (offset < data.length) {
+                int read = input.read(data, offset, data.length - offset);
+                if (read < 0) {
+                    return null;
+                }
+                offset += read;
+            }
+            ByteBuffer buffer = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);
+            byte[] magic = new byte[4];
+            buffer.get(magic);
+            if (!Arrays.equals(magic, JOURNAL_MAGIC)
+                    || Short.toUnsignedInt(buffer.getShort()) != JOURNAL_VERSION) {
+                return null;
+            }
+            buffer.get();
+            buffer.get();
+            byte[] txn = new byte[16];
+            buffer.get(txn);
+            long imageLength = buffer.getLong();
+            long plaintextLength = buffer.getLong();
+            byte[] fileId = new byte[16];
+            buffer.get(fileId);
+            byte[] digest = new byte[32];
+            buffer.get(digest);
+            byte[] footer = new byte[4];
+            buffer.get(footer);
+            byte[] footerTxn = new byte[16];
+            buffer.get(footerTxn);
+            buffer.getInt();
+            if (!Arrays.equals(footer, JOURNAL_MAGIC)
+                    || !Arrays.equals(txn, footerTxn)
+                    || imageLength < HEADER_SIZE
+                    || plaintextLength < 0) {
+                return null;
+            }
+            return new CommitInfo(imageLength, plaintextLength, fileId, digest);
+        } catch (IOException error) {
+            return null;
+        }
+    }
+
+    static void writeCommitFile(File target, long imageLength, long plaintextLength,
+                                byte[] fileId, byte[] digest) throws IOException {
+        if (fileId.length != 16 || digest.length != 32) {
+            throw new IOException("invalid journal fields");
+        }
+        byte[] txn = new byte[16];
+        RANDOM.nextBytes(txn);
+        ByteBuffer buffer = ByteBuffer.allocate(JOURNAL_SIZE)
+                .order(ByteOrder.LITTLE_ENDIAN);
+        buffer.put(JOURNAL_MAGIC);
+        buffer.putShort((short) JOURNAL_VERSION);
+        buffer.put((byte) 0);
+        buffer.put((byte) 0);
+        buffer.put(txn);
+        buffer.putLong(imageLength);
+        buffer.putLong(plaintextLength);
+        buffer.put(fileId);
+        buffer.put(digest);
+        buffer.put(JOURNAL_MAGIC);
+        buffer.put(txn);
+        buffer.putInt(0);
+        File commitTemp = commitTemp(target);
+        try (RandomAccessFile output = new RandomAccessFile(commitTemp, "rw")) {
+            output.setLength(0);
+            output.write(buffer.array());
+            output.getFD().sync();
+        } catch (IOException error) {
+            //noinspection ResultOfMethodCallIgnored
+            commitTemp.delete();
+            throw error;
+        }
+        moveAtomic(commitTemp, commit(target));
+        fsyncDirectory(target.getParentFile());
+    }
+
+    private static boolean hasMagic(File file) {
+        if (!file.isFile() || file.length() < MAGIC.length) {
+            return false;
+        }
+        try (InputStream input = new FileInputStream(file)) {
+            byte[] magic = new byte[MAGIC.length];
+            return input.read(magic) == magic.length && Arrays.equals(magic, MAGIC);
+        } catch (IOException error) {
+            return false;
+        }
+    }
+
+    private static byte[] sha256(File file) throws IOException {
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (Exception error) {
+            throw new IOException("SHA-256 unavailable", error);
+        }
+        try (InputStream input = new FileInputStream(file)) {
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) >= 0) {
+                if (read > 0) {
+                    digest.update(buffer, 0, read);
+                }
+            }
+        }
+        return digest.digest();
+    }
+
+    private static void fsyncDirectory(File directory) {
+        if (directory == null) {
+            return;
+        }
+        try (FileChannel channel = FileChannel.open(directory.toPath(),
+                StandardOpenOption.READ)) {
+            channel.force(true);
+        } catch (IOException ignored) {
+            // Some ROMs/filesystems do not allow opening a directory.
+        }
+    }
+
+    private static void deleteQuietly(File file) {
+        if (file != null && file.isFile()) {
+            //noinspection ResultOfMethodCallIgnored
+            file.delete();
+        }
+    }
+
+    private static final class CommitInfo {
+        final long imageLength;
+        final long plaintextLength;
+        final byte[] fileId;
+        final byte[] digest;
+
+        CommitInfo(long imageLength, long plaintextLength, byte[] fileId,
+                   byte[] digest) {
+            this.imageLength = imageLength;
+            this.plaintextLength = plaintextLength;
+            this.fileId = fileId;
+            this.digest = digest;
+        }
+    }
+
+    private void copyRecord(RandomAccessFile output, int index,
+                            MessageDigest digest) throws IOException {
         byte[] buffer = new byte[8192];
         long offset = HEADER_SIZE + (long) index * (chunkSize + RECORD_OVERHEAD);
         source.seek(offset);
@@ -380,6 +604,7 @@ final class ShieldChunkStore implements AutoCloseable {
                 throw new IOException("truncated FMF2 record");
             }
             output.write(buffer, 0, read);
+            digest.update(buffer, 0, read);
             remaining -= read;
         }
     }
@@ -527,6 +752,14 @@ final class ShieldChunkStore implements AutoCloseable {
 
     private static File temp(File target) {
         return new File(target.getParentFile(), target.getName() + ".fmf2.tmp");
+    }
+
+    private static File commit(File target) {
+        return new File(target.getParentFile(), target.getName() + ".fmf2.commit");
+    }
+
+    private static File commitTemp(File target) {
+        return new File(target.getParentFile(), target.getName() + ".fmf2.commit.tmp");
     }
 
     private static File lockPath(File target) {
