@@ -10,11 +10,13 @@ import typer
 from .intake import PROFILES, SIGNING_MODES, run_intake
 from .inventory import run_inventory
 from .gate import run_gate
+from .formats.legacy import parse_classes_dve, parse_edata
 from .formats.file import (
     DEFAULT_CHUNK_SIZE,
     FileFormatError,
     derive_file_key,
     migrate as migrate_encrypted_file,
+    migrate_rc4 as migrate_rc4_file,
 )
 from .pipeline import BuildOptions, run_build
 from .protect import ProtectOptions, protect
@@ -181,26 +183,66 @@ def migrate_file(
     ),
     chunk_size: int = typer.Option(DEFAULT_CHUNK_SIZE, "--chunk-size"),
     assume_plaintext: bool = typer.Option(False, "--assume-plaintext"),
+    rc4_key: str | None = typer.Option(
+        None, "--rc4-key", help="hex RC4 key for DVE legacy files"
+    ),
+    rc4_type: int = typer.Option(0, "--rc4-type", min=0),
 ) -> None:
-    """Migrate an FMF1 (or plaintext) file to FMF2."""
+    """Migrate an FMF1/plaintext or DVE RC4 file to FMF2."""
     if key_file is not None:
         key = key_file.read_bytes()
     elif k_content is not None and build_id:
         key = derive_file_key(k_content.read_bytes(), build_id)
+    elif rc4_key is not None:
+        key = b""
     else:
         typer.echo("need --key-file or --k-content with --build-id", err=True)
         raise typer.Exit(2)
-    if len(key) != 32:
+    if rc4_key is None and len(key) != 32:
         typer.echo("file key must be 32 bytes", err=True)
         raise typer.Exit(2)
     try:
-        result = migrate_encrypted_file(
-            input, out, key, chunk_size=chunk_size,
-            assume_plaintext=assume_plaintext,
-        )
+        if rc4_key is not None:
+            rc4_bytes = bytes.fromhex(rc4_key)
+            out_key = key if len(key) == 32 else None
+            if out_key is None and len(rc4_bytes) != 32:
+                typer.echo("RC4 migration needs a 32-byte output key", err=True)
+                raise typer.Exit(2)
+            result = migrate_rc4_file(
+                input, out, rc4_bytes, enc_type=rc4_type,
+                chunk_size=chunk_size, out_key=out_key,
+            )
+        else:
+            result = migrate_encrypted_file(
+                input, out, key, chunk_size=chunk_size,
+                assume_plaintext=assume_plaintext,
+            )
     except FileFormatError as error:
         typer.echo(f"migrate failed: {error}", err=True)
         raise typer.Exit(1) from error
+    _echo(result)
+
+
+@app.command("legacy-inspect")
+def legacy_inspect(
+    edata: Path | None = typer.Option(None, "--edata", exists=True, dir_okay=False),
+    dve: Path | None = typer.Option(None, "--dve", exists=True, dir_okay=False),
+) -> None:
+    """Inspect a SecNeo .edata policy or classes.dve stamp."""
+    result: dict = {"ok": True}
+    if edata is not None:
+        parsed = parse_edata(edata.read_text())
+        result["edata"] = {
+            "enc_type": parsed.enc_type,
+            "rules": parsed.rules,
+            "excludes": parsed.excludes,
+        }
+    if dve is not None:
+        stamp = parse_classes_dve(dve.read_bytes())
+        result["classes_dve"] = {"md5": stamp.md5, "ctime": stamp.ctime}
+    if edata is None and dve is None:
+        typer.echo("need --edata or --dve", err=True)
+        raise typer.Exit(2)
     _echo(result)
 
 

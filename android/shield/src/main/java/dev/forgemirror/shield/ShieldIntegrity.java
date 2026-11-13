@@ -1,6 +1,10 @@
 package dev.forgemirror.shield;
 
 import android.content.Context;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.SigningInfo;
+import android.os.Build;
 import android.util.Base64;
 
 import org.json.JSONArray;
@@ -55,6 +59,7 @@ final class ShieldIntegrity {
 
         JSONObject manifest = new JSONObject(new String(payload, java.nio.charset.StandardCharsets.UTF_8));
         verifyArtifacts(context, manifest);
+        verifySigningCertificate(context, config);
     }
 
     private static PublicKey decodeEd25519(byte[] der) throws Exception {
@@ -73,6 +78,45 @@ final class ShieldIntegrity {
         } catch (Exception first) {
             return Signature.getInstance("EdDSA");
         }
+    }
+
+    private static void verifySigningCertificate(Context context, ShieldConfig config)
+            throws Exception {
+        if (config.certSha256 == null || config.certSha256.isEmpty()) {
+            return;
+        }
+        PackageManager manager = context.getPackageManager();
+        String packageName = context.getPackageName();
+        android.content.pm.Signature[] signatures;
+        if (Build.VERSION.SDK_INT >= 28) {
+            PackageInfo info = manager.getPackageInfo(packageName,
+                    PackageManager.GET_SIGNING_CERTIFICATES);
+            SigningInfo signing = info.signingInfo;
+            if (signing == null) {
+                throw new SecurityException("no signing info");
+            }
+            signatures = signing.hasMultipleSigners()
+                    ? signing.getApkContentsSigners()
+                    : signing.getSigningCertificateHistory();
+        } else {
+            PackageInfo info = manager.getPackageInfo(packageName,
+                    PackageManager.GET_SIGNATURES);
+            signatures = info.signatures;
+        }
+        if (signatures == null) {
+            throw new SecurityException("no signatures");
+        }
+        String expected = config.certSha256.toLowerCase(Locale.US);
+        for (android.content.pm.Signature signature : signatures) {
+            String actual = hex(MessageDigest.getInstance("SHA-256")
+                    .digest(signature.toByteArray()));
+            if (MessageDigest.isEqual(
+                    actual.getBytes(java.nio.charset.StandardCharsets.US_ASCII),
+                    expected.getBytes(java.nio.charset.StandardCharsets.US_ASCII))) {
+                return;
+            }
+        }
+        throw new SecurityException("signing certificate mismatch");
     }
 
     private static void verifyArtifacts(Context context, JSONObject manifest) throws Exception {

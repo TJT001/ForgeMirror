@@ -55,10 +55,19 @@ public class MainActivity extends AppCompatActivity {
 
         TextView tv = binding.sampleText;
         String probeFile = getFilesDir() + "/harness_ra_renamed.txt";
+        int textWriteErr = nativeProbeWriteText(probeFile, "T2XYZ6");
+        String nativeText = nativeProbeText(probeFile);
+        String javaText = HarnessStorage.readRandomText(this);
+        int mmapWriteErr = nativeProbeMmapWrite(probeFile, "M2XYZ6");
+        String javaMmap = HarnessStorage.readRandomText(this);
+        nativeProbeWriteText(probeFile, "0Q2XYZ");
         String probe = "probe writeErr=" + nativeProbeWrite(probeFile)
                 + " readErr=" + nativeProbeRead(probeFile)
                 + " mmapErr=" + nativeProbeMmap(probeFile)
-                + " syscallErr=" + nativeProbeSyscall(probeFile);
+                + " syscallErr=" + nativeProbeSyscall(probeFile)
+                + " textErr=" + textWriteErr + " native=" + nativeText
+                + " java=" + javaText + " mmapWriteErr=" + mmapWriteErr
+                + " javaMmap=" + javaMmap;
         tv.setText(stringFromJNI() + "\n" + appStatus + "\n" + providerStatus
                 + "\n" + HarnessStorage.verify(this) + "\n" + probe);
     }
@@ -92,4 +101,10 @@ public class MainActivity extends AppCompatActivity {
     public native int nativeProbeMmap(String path);
 
     public native int nativeProbeSyscall(String path);
+
+    public native String nativeProbeText(String path);
+
+    public native int nativeProbeWriteText(String path, String value);
+
+    public native int nativeProbeMmapWrite(String path, String value);
 }

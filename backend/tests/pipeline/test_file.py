@@ -96,5 +96,60 @@ class FileFormatTests(unittest.TestCase):
         )
 
 
+    def test_rc4_known_vector(self) -> None:
+        self.assertEqual(
+            fmfile.rc4_crypt(b"Plaintext", b"Key").hex(),
+            "bbf316e8d940af0ad3",
+        )
+
+    def test_migrate_dve_rc4_type0(self) -> None:
+        plaintext = pattern(70000)
+        key = bytes(range(1, 33))
+        encrypted = fmfile.rc4_crypt(plaintext, key)
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "legacy.dve"
+            out = Path(temporary) / "migrated.bin"
+            source.write_bytes(encrypted)
+            result = fmfile.migrate_rc4(source, out, key, enc_type=0)
+            self.assertEqual(result["source_format"], "dve-rc4-0")
+            _, decoded = fmfile.decode_fmf2(out.read_bytes(), key)
+            self.assertEqual(decoded, plaintext)
+
+    def test_migrate_dve_rc4_type1(self) -> None:
+        plaintext = pattern(70000)
+        key = bytes(range(1, 33))
+        head = 0x20000
+        encrypted = bytearray(plaintext)
+        encrypted[:head] = fmfile.rc4_crypt(plaintext[:head], key)
+        for index in range(head, len(encrypted)):
+            encrypted[index] ^= 0xAC
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "legacy.dve"
+            out = Path(temporary) / "migrated.bin"
+            source.write_bytes(bytes(encrypted))
+            result = fmfile.migrate_rc4(source, out, key, enc_type=1)
+            self.assertEqual(result["source_format"], "dve-rc4-1")
+            _, decoded = fmfile.decode_fmf2(out.read_bytes(), key)
+            self.assertEqual(decoded, plaintext)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class LegacyMetadataTests(unittest.TestCase):
+    def test_parse_edata(self) -> None:
+        from forgemirror.formats.legacy import parse_edata
+
+        parsed = parse_edata("enc_type/0\nshared_prefs/*.xml\n!databases/a.db\n")
+        self.assertEqual(parsed.enc_type, 0)
+        self.assertEqual(parsed.rules, ["shared_prefs/*.xml"])
+        self.assertEqual(parsed.excludes, ["databases/a.db"])
+
+    def test_parse_classes_dve(self) -> None:
+        from forgemirror.formats.legacy import parse_classes_dve
+
+        blob = bytes(range(16)) + (123456).to_bytes(8, "little", signed=True)
+        stamp = parse_classes_dve(blob)
+        self.assertEqual(stamp.md5, bytes(range(16)).hex())
+        self.assertEqual(stamp.ctime, 123456)

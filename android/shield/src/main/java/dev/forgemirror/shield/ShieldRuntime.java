@@ -92,6 +92,7 @@ public final class ShieldRuntime {
                     return state;
                 }
                 fileKey = ShieldPolicy.deriveFileKey(key, config.buildId);
+                ShieldNativeIo.configure(context);
                 try {
                     int hookStatus = ShieldNativeFileHook.configure(
                             context.getApplicationInfo().dataDir, true);
@@ -103,6 +104,7 @@ public final class ShieldRuntime {
                 ShieldEvents.init(context, config, fileKey);
                 ShieldDetect.start(context, config);
                 ShieldRuleUpdater.start(context, config, key);
+                ShieldFileWatch.start(context, config);
                 byte[] container = ShieldAssets.read(context, config.container);
                 byte[][] dex = ShieldContainer.open(container, key);
                 ByteBuffer[] buffers = new ByteBuffer[dex.length];

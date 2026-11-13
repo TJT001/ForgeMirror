@@ -112,6 +112,21 @@ public final class HarnessStorage {
         }
     }
 
+    public static String readRandomText(Context context) {
+        try (dev.forgemirror.shield.ShieldRandomAccess random =
+                     ShieldStorageFacade.openRandomAccessFile(
+                             context, "harness_ra_renamed.txt", "r")) {
+            byte[] data = new byte[(int) random.length()];
+            int read = random.read(data);
+            if (read <= 0) {
+                return "";
+            }
+            return new String(data, 0, read, StandardCharsets.UTF_8);
+        } catch (IOException error) {
+            return "err:" + error.getMessage();
+        }
+    }
+
     public static String verify(Context context) {
         SharedPreferences prefs =
                 ShieldStorageFacade.getSharedPreferences(context, "harness_prefs");

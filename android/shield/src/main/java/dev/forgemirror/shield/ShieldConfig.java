@@ -21,6 +21,7 @@ final class ShieldConfig {
     final boolean detection;
     final String response;
     final int rulesVersion;
+    final String certSha256;
 
     private ShieldConfig(
             String originalApplication,
@@ -38,7 +39,8 @@ final class ShieldConfig {
             String eventToken,
             boolean detection,
             String response,
-            int rulesVersion) {
+            int rulesVersion,
+            String certSha256) {
         this.originalApplication = originalApplication;
         this.originalFactory = originalFactory;
         this.shellVersion = shellVersion;
@@ -55,6 +57,7 @@ final class ShieldConfig {
         this.detection = detection;
         this.response = response;
         this.rulesVersion = rulesVersion;
+        this.certSha256 = certSha256;
     }
 
     static ShieldConfig load(Context context) throws Exception {
@@ -75,6 +78,7 @@ final class ShieldConfig {
                 json.optString("event_token", ""),
                 json.optBoolean("detection", true),
                 json.optString("response", "toast"),
-                json.optInt("rules_version", 1));
+                json.optInt("rules_version", 1),
+                json.optString("cert_sha256", ""));
     }
 }

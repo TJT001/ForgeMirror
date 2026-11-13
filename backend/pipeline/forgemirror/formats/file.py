@@ -211,3 +211,69 @@ def migrate(
         "chunk_count": (len(plaintext) + chunk_size - 1) // chunk_size,
         "fmf2_bytes": len(encoded),
     }
+
+
+def rc4_crypt(data: bytes, key: bytes) -> bytes:
+    if not key:
+        raise FileFormatError("empty RC4 key")
+    state = list(range(256))
+    j = 0
+    for i in range(256):
+        j = (j + state[i] + key[i % len(key)]) & 0xFF
+        state[i], state[j] = state[j], state[i]
+    output = bytearray(len(data))
+    i = j = 0
+    for index, value in enumerate(data):
+        i = (i + 1) & 0xFF
+        j = (j + state[i]) & 0xFF
+        state[i], state[j] = state[j], state[i]
+        output[index] = value ^ state[(state[i] + state[j]) & 0xFF]
+    return bytes(output)
+
+
+def decrypt_dve(blob: bytes, key: bytes, enc_type: int = 0,
+                chunk: int = 0x20000, xor_byte: int = 0xAC) -> bytes:
+    """Decode a SecNeo DVE-style RC4 file.
+
+    enc_type == 0: whole-file RC4.
+    enc_type != 0: first ``chunk`` bytes RC4, the remainder XOR ``xor_byte``.
+    """
+    if enc_type == 0:
+        return rc4_crypt(blob, key)
+    head = min(len(blob), chunk)
+    output = bytearray(blob)
+    if head:
+        output[:head] = rc4_crypt(blob[:head], key)
+    for index in range(head, len(blob)):
+        output[index] ^= xor_byte
+    return bytes(output)
+
+
+def migrate_rc4(
+    source: Path,
+    out: Path,
+    key: bytes,
+    enc_type: int = 0,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    out_key: bytes | None = None,
+) -> dict:
+    blob = source.read_bytes()
+    plaintext = decrypt_dve(blob, key, enc_type)
+    encoded = encode_fmf2(plaintext, out_key if out_key is not None else key, chunk_size)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    temp = out.with_name(out.name + ".tmp")
+    with open(temp, "wb") as handle:
+        handle.write(encoded)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temp, out)
+    return {
+        "ok": True,
+        "source": str(source),
+        "out": str(out),
+        "source_format": f"dve-rc4-{enc_type}",
+        "plaintext_bytes": len(plaintext),
+        "chunk_size": chunk_size,
+        "chunk_count": (len(plaintext) + chunk_size - 1) // chunk_size,
+        "fmf2_bytes": len(encoded),
+    }

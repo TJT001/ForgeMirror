@@ -58,6 +58,34 @@ final class ShieldFiles {
         }
     }
 
+    static byte[] readAllPlaintext(File source, byte[] key) throws IOException {
+        if (!source.isFile()) {
+            return new byte[0];
+        }
+        if (ShieldChunkStore.matches(source)) {
+            return ShieldChunkStore.readAll(source, key);
+        }
+        byte[] blob = new byte[(int) source.length()];
+        try (FileInputStream in = new FileInputStream(source)) {
+            int offset = 0;
+            while (offset < blob.length) {
+                int read = in.read(blob, offset, blob.length - offset);
+                if (read < 0) {
+                    break;
+                }
+                offset += read;
+            }
+        }
+        if (!ShieldCrypto.isFileEncrypted(blob)) {
+            return blob;
+        }
+        try {
+            return ShieldCrypto.fileDecrypt(blob, key);
+        } catch (Exception error) {
+            throw new IOException("encrypted file rejected: " + source, error);
+        }
+    }
+
     static FileInputStream openInput(File source, byte[] key) throws IOException {
         if (!source.isFile()) {
             throw new FileNotFoundException(source.getPath());

@@ -214,6 +214,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             "detection": True,
             "response": "toast",
             "rules_version": 1,
+            "cert_sha256": cert,
             "app_id": package,
             "build_salt": secrets.token_hex(16),
         }

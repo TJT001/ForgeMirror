@@ -61,6 +61,28 @@ final class ShieldChunkStore implements AutoCloseable {
         return new ShieldChunkStore(target, key, mode, false);
     }
 
+    static byte[] readAll(File target, byte[] key) throws IOException {
+        if (!target.isFile() || target.length() == 0) {
+            return new byte[0];
+        }
+        try (ShieldChunkStore store = open(target, key, "r")) {
+            long length = store.length();
+            if (length > MAX_LENGTH) {
+                throw new IOException("file too large");
+            }
+            byte[] data = new byte[(int) length];
+            int offset = 0;
+            while (offset < data.length) {
+                int read = store.read(offset, data, offset, data.length - offset);
+                if (read < 0) {
+                    break;
+                }
+                offset += read;
+            }
+            return data;
+        }
+    }
+
     static void writeAll(File target, byte[] key, byte[] plaintext) throws IOException {
         if (plaintext.length > MAX_LENGTH) {
             throw new IOException("file too large for FMF2");
