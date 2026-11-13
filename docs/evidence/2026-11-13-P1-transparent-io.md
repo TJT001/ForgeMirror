@@ -194,3 +194,11 @@ ShieldDetectionBridge: registered
   Java 层文件保护、YARA、事件、检测均可用；ShadowHook 仅 ARM，因此 x86 没有原生 I/O hook，
   透明 memfd/native block 在 x86 上不可用（Java facade 仍工作）。
 - ARM 设备回归：`self check ok shellLibs=0`、`YARA rules compiled`、探针全 0。
+
+### 大文件上限与 fail-closed（本轮）
+
+- `max_native_file_mb` 配置项（默认 128）替代固定 64 MiB；写入 `shield/config.json`，
+  由 `ShieldNativeIo.configure` 应用。
+- 透明化失败（超限、Java 侧不可用等）时，业务 native 对覆盖路径的打开改为 **fail-closed**：
+  读返回 `EACCES`/`ENOENT`，不再回退读取密文；`O_EXCL` 保留 `EEXIST`。
+- 设备回归：探针全部 0 错误，`self check ok`。

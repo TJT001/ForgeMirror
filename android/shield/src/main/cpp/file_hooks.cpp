@@ -409,6 +409,14 @@ int proxy_open(const char *path, int flags, ...) {
         if (shadow >= 0) {
             return shadow;
         }
+        if (is_covered(resolved.c_str()) && deny_now()) {
+            if (errno == EEXIST) {
+                return -1;
+            }
+            errno = (write_flags(flags) || access(resolved.c_str(), F_OK) == 0)
+                    ? EACCES : ENOENT;
+            return -1;
+        }
     }
     if (write_flags(flags) && !resolved.empty() && is_covered(resolved.c_str()) &&
         deny_now()) {
@@ -442,6 +450,14 @@ int proxy_openat(int dirfd, const char *path, int flags, ...) {
         if (shadow >= 0) {
             return shadow;
         }
+        if (is_covered(resolved.c_str()) && deny_now()) {
+            if (errno == EEXIST) {
+                return -1;
+            }
+            errno = (write_flags(flags) || access(resolved.c_str(), F_OK) == 0)
+                    ? EACCES : ENOENT;
+            return -1;
+        }
     }
     if (write_flags(flags) && !resolved.empty() && is_covered(resolved.c_str()) &&
         deny_now()) {
@@ -473,6 +489,14 @@ int proxy_open64(const char *path, int flags, ...) {
         int shadow = try_shadow_open(resolved.c_str(), flags);
         if (shadow >= 0) {
             return shadow;
+        }
+        if (is_covered(resolved.c_str()) && deny_now()) {
+            if (errno == EEXIST) {
+                return -1;
+            }
+            errno = (write_flags(flags) || access(resolved.c_str(), F_OK) == 0)
+                    ? EACCES : ENOENT;
+            return -1;
         }
     }
     if (write_flags(flags) && !resolved.empty() && is_covered(resolved.c_str()) &&
@@ -507,6 +531,14 @@ int proxy_openat64(int dirfd, const char *path, int flags, ...) {
         if (shadow >= 0) {
             return shadow;
         }
+        if (is_covered(resolved.c_str()) && deny_now()) {
+            if (errno == EEXIST) {
+                return -1;
+            }
+            errno = (write_flags(flags) || access(resolved.c_str(), F_OK) == 0)
+                    ? EACCES : ENOENT;
+            return -1;
+        }
     }
     if (write_flags(flags) && !resolved.empty() && is_covered(resolved.c_str()) &&
         deny_now()) {
@@ -534,6 +566,14 @@ int proxy_open2(const char *path, int flags) {
         int shadow = try_shadow_open(resolved.c_str(), flags);
         if (shadow >= 0) {
             return shadow;
+        }
+        if (is_covered(resolved.c_str()) && deny_now()) {
+            if (errno == EEXIST) {
+                return -1;
+            }
+            errno = (write_flags(flags) || access(resolved.c_str(), F_OK) == 0)
+                    ? EACCES : ENOENT;
+            return -1;
         }
     }
     if (write_flags(flags) && !resolved.empty() && is_covered(resolved.c_str()) &&
@@ -563,6 +603,14 @@ int proxy_openat2(int dirfd, const char *path, int flags) {
         int shadow = try_shadow_open(resolved.c_str(), flags);
         if (shadow >= 0) {
             return shadow;
+        }
+        if (is_covered(resolved.c_str()) && deny_now()) {
+            if (errno == EEXIST) {
+                return -1;
+            }
+            errno = (write_flags(flags) || access(resolved.c_str(), F_OK) == 0)
+                    ? EACCES : ENOENT;
+            return -1;
         }
     }
     if (write_flags(flags) && !resolved.empty() && is_covered(resolved.c_str()) &&
@@ -739,11 +787,13 @@ int proxy_openat2_how(int dirfd, const char *path, struct open_how *how, size_t 
             }
             return shadow;
         }
-        if (write_flags(flags)) {
+        if (write_flags(flags) || access(resolved.c_str(), F_OK) == 0) {
             log_deny("openat2", resolved.c_str());
             errno = EACCES;
             return -1;
         }
+        errno = ENOENT;
+        return -1;
     }
     auto prev = (openat2_how_t) shadowhook_get_prev_func((void *) &proxy_openat2_how);
     return prev != nullptr ? prev(dirfd, path, how, size) : -1;

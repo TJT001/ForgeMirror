@@ -20,7 +20,7 @@ import java.util.Map;
  */
 final class ShieldNativeIo {
     private static final String TAG = "ShieldNativeIo";
-    private static final long MAX_FILE = 64L << 20;
+    private static long maxFileBytes = 128L << 20;
     private static final Map<Integer, State> OPEN = new HashMap<>();
 
     private static Context appContext;
@@ -28,9 +28,12 @@ final class ShieldNativeIo {
     private ShieldNativeIo() {
     }
 
-    static void configure(Context context) {
+    static void configure(Context context, int maxFileMb) {
         appContext = context.getApplicationContext() != null
                 ? context.getApplicationContext() : context;
+        if (maxFileMb >= 1 && maxFileMb <= 1024) {
+            maxFileBytes = (long) maxFileMb << 20;
+        }
     }
 
     static synchronized int open(String path, boolean writable) {
@@ -53,7 +56,7 @@ final class ShieldNativeIo {
             byte[] plaintext = target.isFile()
                     ? ShieldFiles.readAllPlaintext(target, key)
                     : new byte[0];
-            if (plaintext.length > MAX_FILE) {
+            if (plaintext.length > maxFileBytes) {
                 return -1;
             }
             android.os.ParcelFileDescriptor descriptor = writeMemfd(plaintext);
@@ -79,7 +82,7 @@ final class ShieldNativeIo {
             try {
                 StructStat stat = Os.fstat(state.descriptor.getFileDescriptor());
                 long size = stat.st_size;
-                if (size > MAX_FILE) {
+                if (size > maxFileBytes) {
                     throw new IllegalStateException("file too large");
                 }
                 byte[] data = new byte[(int) size];

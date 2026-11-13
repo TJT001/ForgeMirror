@@ -92,7 +92,7 @@ public final class ShieldRuntime {
                     return state;
                 }
                 fileKey = ShieldPolicy.deriveFileKey(key, config.buildId);
-                ShieldNativeIo.configure(context);
+                ShieldNativeIo.configure(context, config.maxNativeFileMb);
                 try {
                     int hookStatus = ShieldNativeFileHook.configure(
                             context.getApplicationInfo().dataDir, true);
