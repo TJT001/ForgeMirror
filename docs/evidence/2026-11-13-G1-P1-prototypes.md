@@ -24,7 +24,7 @@
 | P1-D1–D2 | done | 策略通配/排除、SharedPreferences 适配 |
 | P1-D3 | done | open/read/write/pread/pwrite/lseek/close + dup/dup2/dup3；mmap/msync |
 | P1-D4 | done | 每文件 AEAD、逻辑偏移、原子迁移、排除直通 |
-| P1-D5 | done（原型级） | 截断、残留 tmp、并发锁、重命名、排除 SQLite；FMF2 提交日志与崩溃恢复 |
+| P1-D5 | done（原型级） | 截断、残留 tmp、并发锁、重命名、排除 SQLite；FMF2 增量 WAL 与崩溃恢复 |
 | P1-E | done | API/worker/PostgreSQL/Vue/开发授权 |
 
 ## 设备矩阵
@@ -56,7 +56,7 @@ Demo harness 的 `firstFrameMs` 包含 3 秒探针 sleep，不计入基线。
 
 | 类别 | 遗留 | 影响 |
 |---|---|---|
-| 崩溃恢复 | FMF2 已有提交日志 + 前滚/回滚；日志引用完整临时镜像，非增量 WAL；目录 fsync 尽力而为 | 掉电原子性未对所有 ROM 证明；`ShieldFiles` 未接入日志 |
+| 崩溃恢复 | FMF2 已有增量 WAL + 前滚/回滚；旧 FMJ1 仅兼容；目录 fsync 尽力而为 | 掉电原子性未对所有 ROM 证明；`ShieldFiles` 未接入日志 |
 | 并发 | 跨进程各自 memfd 快照，最后关闭者覆盖；无合并 | 多进程同文件并发写不安全 |
 | 锁语义 | `flock/fcntl` 作用在 memfd，不与真实文件锁互通 | 依赖文件锁的 native 代码需适配 |
 | 系统调用 | 内联 `svc`、`io_uring` 未覆盖；`openat2.resolve` 未模拟 | 直接 syscall 可绕过透明 I/O |

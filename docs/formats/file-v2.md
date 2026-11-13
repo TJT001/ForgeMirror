@@ -74,61 +74,74 @@ chunk_len = min(chunk_size, plaintext_len - i * chunk_size)
 1. 打开 `FMF2` 时校验头部长度、magic、版本、算法、块大小、`chunk_count`、
    文件总长与 `header_tag`；任何不一致拒绝。
 2. 读取某块时校验该块 tag；失败拒绝，不返回部分明文。
-3. 写入在内存中修改受影响块，持久化时：
-   - 在同目录创建 `<name>.fmf2.tmp`；
-   - 写新头部（新 nonce/tag）；
-   - 顺序复制未修改块（原始密文），重写脏块（新 nonce）；
-   - `fsync` 临时镜像，计算整文件 SHA-256；
-   - 写 `<name>.fmf2.commit` 提交日志（112 字节，见 §4.1）并 `fsync`；
-   - 原子 rename 临时镜像覆盖目标，尽力 `fsync` 目录；
-   - 删除提交日志并再次 `fsync` 目录；
-   - 失败时保留提交日志，下次打开重放。
+3. 写入在内存中修改受影响块；门面整体写入（`writeAll`）若目标已是合法 FMF2，
+   先逐块比较，只把差异块标记为脏。持久化时只把**脏块**写入增量 WAL：
+   - 新文件/目标缺失：WAL 标记 `full`，包含全部块；
+   - 已有目标：WAL 只包含脏块、扩展块和被截断清零的末块；
+   - 写 `<name>.fmf2.wal.tmp`（新头部 + 记录 + footer）并 `fsync`；
+   - 原子 rename 为 `<name>.fmf2.wal`，`fsync` 目录，作为提交点；
+   - 把 WAL 中的新头部和脏块原位写入目标，`setLength` 到新长度，`fsync`；
+   - 删除 WAL 并 `fsync` 目录。
 4. 打开时先执行恢复（在获取文件锁之后）：
-   - 有合法提交日志且临时镜像长度/SHA-256 匹配 → 前滚（rename）并删除日志；
-   - 目标长度/SHA-256 已匹配日志 → 事务已生效，删除日志/临时镜像；
-   - 日志损坏、镜像缺失或哈希不匹配 → 回滚：删除日志/临时镜像，保留原目标。
-   - 无提交日志时删除遗留临时文件。
+   - WAL 结构、footer SHA-256、新头部 AEAD、每条块 AEAD 全部通过后前滚；
+   - 增量 WAL 还要求目标头部 `file_id` 与 WAL 的 `base_file_id` 一致；
+   - WAL 损坏、基文件不匹配或块校验失败 → 回滚：删除 WAL，保留原目标；
+   - 目标已被前滚但 WAL 未删除 → 重放是幂等的，随后清理 WAL；
+   - 无 WAL 时删除遗留 `.wal.tmp` / 旧 `.fmf2.tmp`。
 5. 截断时对末块超出新长度的区域清零，防止后续扩展复活旧明文。
 
-### 4.1 提交日志 `<name>.fmf2.commit`
+### 4.1 WAL `<name>.fmf2.wal`
 
-固定 112 字节，little-endian；日志本身不包含明文：
+固定头 128 字节（little-endian），随后是 `record_count` 条记录，最后 52 字节
+footer。WAL 不包含业务明文。
 
 | 偏移 | 长度 | 字段 |
 |---:|---:|---|
-| 0 | 4 | magic `FMJ1` |
+| 0 | 4 | magic `FMW1` |
 | 4 | 2 | version = 1 |
-| 6 | 1 | flags = 0 |
-| 7 | 1 | reserved |
+| 6 | 2 | flags（bit0 = full） |
 | 8 | 16 | txn id |
-| 24 | 8 | 镜像长度 |
-| 32 | 8 | 明文长度 |
-| 40 | 16 | `file_id` |
-| 56 | 32 | 临时镜像 SHA-256 |
-| 88 | 4 | footer magic `FMJ1` |
-| 92 | 16 | footer txn id（必须与头部一致） |
-| 108 | 4 | reserved |
+| 24 | 16 | base `file_id`（增量 WAL 用） |
+| 40 | 72 | 新 FMF2 头部（含 header nonce/tag） |
+| 112 | 4 | record count |
+| 116 | 4 | record bytes |
+| 120 | 8 | reserved |
 
-提交日志先写入 `<name>.fmf2.commit.tmp` 并 `fsync`，再原子 rename 为
-`.fmf2.commit`，避免半条提交记录被误认为有效事务。
+记录（固定 `chunk_size + 36` 字节）：
+
+| 偏移 | 长度 | 字段 |
+|---:|---:|---|
+| 0 | 4 | chunk index |
+| 4 | 4 | chunk_len |
+| 8 | 12 | chunk nonce |
+| 20 | chunk_size | 密文 |
+| 20 + chunk_size | 16 | GCM tag |
+
+Footer：`magic FMW1 (4) || txn id (16) || SHA-256(header+records) (32)`。
+
+- `full` WAL 必须包含 `0..chunk_count-1` 全部记录，可在目标缺失时重建；
+- 增量 WAL 依赖目标中未记录块仍然有效，因此校验 `base_file_id`；
+- 前滚前先完整校验 footer、新头部 tag 和每条记录 tag，避免坏 WAL 写坏目标；
+- 旧 `FMJ1` `.fmf2.commit` + `.fmf2.tmp` 恢复路径保留，用于兼容旧版本遗留事务。
 
 ### 4.2 崩溃窗口
 
 | 崩溃点 | 恢复行为 |
 |---|---|
-| 临时镜像写入中 | 无合法日志，删除 tmp，原目标可用 |
-| 临时镜像已 fsync、日志写入中 | 日志无效，回滚，原目标可用 |
-| 日志已提交、rename 前 | 前滚到新镜像 |
-| rename 后、删除日志前 | 目标哈希匹配日志，清理日志 |
-| 删除日志后 | 事务完成 |
+| WAL tmp 写入中 | 无合法 WAL，删除 tmp，原目标可用 |
+| WAL 已 fsync、rename 前 | 删除 tmp，原目标可用（事务未提交） |
+| WAL 已 rename、前滚前 | 前滚 WAL |
+| 前滚中（目标部分写入） | WAL 仍完整，重放幂等完成 |
+| 前滚完成、删除 WAL 前 | 重放幂等，随后清理 WAL |
+| 删除 WAL 后 | 事务完成 |
 
 ### 4.3 限制（事务相关）
 
 - 目录 `fsync` 尽力而为；部分 ROM/文件系统不允许以只读方式打开目录，掉电原子性
   不能对所有设备作绝对保证。
-- 日志只保存“已准备的完整镜像”引用，不是按脏块的增量 WAL；每次持久化仍复制
-  未修改块。
+- WAL 只记录脏块，但每条记录仍为固定块大小；随机写会重写整个受影响块。
 - 跨进程并发写仍由文件锁串行化，没有多写者合并。
+- WAL 校验需要两次读取（校验 + 应用）；大文件 fsync 时延需按设备基线评估。
 
 ## 5. 迁移
 
@@ -142,4 +155,4 @@ chunk_len = min(chunk_size, plaintext_len - i * chunk_size)
 - 目录 fsync 为尽力而为，未做掉电原子性证明；
 - 固定槽位会为末块补零，最大浪费一个块；
 - 当前门面限制 64 MiB，格式本身允许更大；
-- 提交日志保存完整镜像引用，不是增量 WAL。
+- 增量 WAL 只保存脏块；旧 `FMJ1` 提交日志仅用于兼容恢复。

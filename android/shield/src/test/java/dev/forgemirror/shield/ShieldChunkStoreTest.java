@@ -264,6 +264,82 @@ public final class ShieldChunkStoreTest {
         assertArrayEquals(data, readAll(renamed));
     }
 
+    private static byte[] readOpened(File file) throws Exception {
+        try (ShieldChunkStore store = ShieldChunkStore.open(file, KEY, "r")) {
+            long length = store.length();
+            byte[] data = new byte[(int) length];
+            int offset = 0;
+            while (offset < length) {
+                int read = store.read(offset, data, offset,
+                        (int) (length - offset));
+                if (read < 0) {
+                    break;
+                }
+                offset += read;
+            }
+            assertEquals(length, offset);
+            return data;
+        }
+    }
+
+    @Test
+    public void fullWalReplayCreatesMissingTarget() throws Exception {
+        File target = new File(folder.getRoot(), "wal-missing.bin");
+        byte[] data = pattern(7000, 31);
+        File wal = ShieldChunkStore.prepareWal(target, KEY, data, true);
+        assertTrue(wal.isFile());
+        assertFalse(target.isFile());
+        assertArrayEquals(data, readOpened(target));
+        assertFalse(wal.isFile());
+    }
+
+    @Test
+    public void incrementalWalOnlyLogsDirtyChunks() throws Exception {
+        File target = new File(folder.getRoot(), "wal-incremental.bin");
+        byte[] original = pattern(200000, 32);
+        try (ShieldChunkStore store = ShieldChunkStore.open(target, KEY, "rw")) {
+            writeBlocks(store, original);
+        }
+        byte[] updated = original.clone();
+        byte[] patch = pattern(100, 33);
+        System.arraycopy(patch, 0, updated, 0, patch.length);
+        File wal = ShieldChunkStore.prepareWalPatch(target, KEY, 0, patch);
+        assertTrue(wal.length() < original.length);
+        assertArrayEquals(updated, readAll(target));
+        assertFalse(wal.isFile());
+    }
+
+    @Test
+    public void corruptedWalRollsBack() throws Exception {
+        File target = new File(folder.getRoot(), "wal-corrupt.bin");
+        byte[] original = pattern(6000, 34);
+        try (ShieldChunkStore store = ShieldChunkStore.open(target, KEY, "rw")) {
+            writeBlocks(store, original);
+        }
+        File wal = ShieldChunkStore.prepareWal(target, KEY,
+                pattern(8000, 35), true);
+        try (RandomAccessFile raw = new RandomAccessFile(wal, "rw")) {
+            raw.setLength(wal.length() - 8);
+        }
+        assertArrayEquals(original, readAll(target));
+        assertFalse(wal.isFile());
+    }
+
+    @Test
+    public void appliedWalLeftoverIsIdempotent() throws Exception {
+        File target = new File(folder.getRoot(), "wal-applied.bin");
+        byte[] data = pattern(5000, 36);
+        File wal = ShieldChunkStore.prepareWal(target, KEY, data, true);
+        File backup = new File(folder.getRoot(), "wal-backup.bin");
+        Files.copy(wal.toPath(), backup.toPath(),
+                StandardCopyOption.REPLACE_EXISTING);
+        ShieldChunkStore.applyWalFile(target, wal, KEY);
+        Files.copy(backup.toPath(), wal.toPath(),
+                StandardCopyOption.REPLACE_EXISTING);
+        assertArrayEquals(data, readAll(target));
+        assertFalse(wal.isFile());
+    }
+
     @Test
     public void committedJournalReplaysPreparedImage() throws Exception {
         File target = new File(folder.getRoot(), "journal.bin");
@@ -365,6 +441,19 @@ public final class ShieldChunkStoreTest {
             }
         }
         return digest.digest();
+    }
+
+    @Test
+    public void writeAllUpdatesExistingChunksThroughWal() throws Exception {
+        File target = new File(folder.getRoot(), "writeall-diff.bin");
+        byte[] first = pattern(150000, 41);
+        ShieldChunkStore.writeAll(target, KEY, first);
+        byte[] second = first.clone();
+        byte[] patch = pattern(64, 42);
+        System.arraycopy(patch, 0, second, 70000, patch.length);
+        ShieldChunkStore.writeAll(target, KEY, second);
+        assertArrayEquals(second, readAll(target));
+        assertTrue(ShieldChunkStore.matches(target));
     }
 
     @Test
