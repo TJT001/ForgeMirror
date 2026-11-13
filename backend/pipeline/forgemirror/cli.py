@@ -110,6 +110,9 @@ def protect_apk(
     self_decrypt_core: bool = typer.Option(
         True, "--self-decrypt-core/--no-self-decrypt-core"
     ),
+    decoy_dynamic: bool = typer.Option(
+        True, "--decoy-dynamic/--no-decoy-dynamic"
+    ),
     key_dir: Path = typer.Option(Path("artifacts/keys"), "--key-dir"),
     alg: str = typer.Option("ecdsa-p256-sha256", "--alg"),
     shell_version: str = typer.Option("0.1.0", "--shell-version"),
@@ -159,6 +162,7 @@ def protect_apk(
             no_key_asset=no_key_asset,
             key_dir=key_dir,
             self_decrypt_core=self_decrypt_core,
+            decoy_dynamic=decoy_dynamic,
             alg=alg,
         ),
         tools,

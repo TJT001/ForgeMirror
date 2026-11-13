@@ -18,6 +18,7 @@ from pathlib import Path
 
 from .apk import elf_arch
 from .formats import axml
+from .formats.elf import ElfError, add_dynamic_decoy
 from .formats.container import open_container
 from .formats.policy import pack_policy
 from .formats.rules import pack_rules
@@ -91,6 +92,7 @@ class ProtectOptions:
     alg: str = "ecdsa-p256-sha256"
     strip_customer_libs: bool = True
     self_decrypt_core: bool = True
+    decoy_dynamic: bool = True
 
 
 def _stub_from_aar(aar: Path, tools: AndroidTools, tmp: Path) -> tuple[bytes, dict[str, bytes]]:
@@ -209,6 +211,16 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
                      if name.endswith("/libshield_core.so")}
         drop_libs: set[str] = set()
         core_assets: dict[str, bytes] = {}
+        if options.decoy_dynamic:
+            for name in list(shield_libs):
+                if "libshield" not in name and "libshadowhook" not in name:
+                    continue
+                if name.endswith("/libshield_core.so"):
+                    continue
+                try:
+                    shield_libs[name], _ = add_dynamic_decoy(shield_libs[name])
+                except ElfError as error:
+                    warnings.append(f"dynamic decoy skipped for {name}: {error}")
         if options.self_decrypt_core:
             core_key = _core_key(k_content, options.build_id)
             for name in list(shield_libs):
