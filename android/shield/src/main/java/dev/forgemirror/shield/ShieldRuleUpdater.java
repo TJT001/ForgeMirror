@@ -77,7 +77,7 @@ final class ShieldRuleUpdater {
                     continue;
                 }
                 String mode = incoming.optString(rule, "");
-                if ("log".equals(mode) || "toast".equals(mode) || "block".equals(mode)) {
+                if ("log".equals(mode) || "toast".equals(mode) || "block".equals(mode) || "degrade".equals(mode)) {
                     policies.put(rule, mode);
                 }
             }

@@ -24,7 +24,7 @@ final class ShieldServerConfig {
 
     static String response(Context context, String fallback) {
         String value = read(context).optString("response", fallback);
-        if ("log".equals(value) || "toast".equals(value) || "block".equals(value)) {
+        if ("log".equals(value) || "toast".equals(value) || "block".equals(value) || "degrade".equals(value)) {
             return value;
         }
         return fallback;
@@ -34,7 +34,7 @@ final class ShieldServerConfig {
         JSONObject policies = read(context).optJSONObject("policies");
         if (policies != null && ruleId != null) {
             String value = policies.optString(ruleId, "");
-            if ("log".equals(value) || "toast".equals(value) || "block".equals(value)) {
+            if ("log".equals(value) || "toast".equals(value) || "block".equals(value) || "degrade".equals(value)) {
                 return value;
             }
         }

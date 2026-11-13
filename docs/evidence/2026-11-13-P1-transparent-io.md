@@ -172,3 +172,14 @@ ShieldDetectionBridge: registered
   通过 Java facade 读回 `P2XYZ6`；日志可见周期 `sync fd=...`。
 - `ShieldFileWatch` 改为递归扫描 `files/shield` 子树（深度 4），并保留 `files/` 父目录观察。
 - 崩溃恢复仍非事务日志：最多丢约 2 秒未同步写入；>64 MiB 仍走拒绝/回退路径。
+
+### `degrade` 档
+
+- `degrade` 只阻断业务 native 对覆盖路径的**写打开**（`O_WRONLY/O_RDWR/O_CREAT/O_TRUNC/O_APPEND`），
+  读继续走透明 memfd；`block` 才阻断全部打开。
+- 服务端/客户端策略值支持 `log` / `toast` / `degrade` / `block`。
+- 设备：
+  ```text
+  ShieldResponse: response rule=file_tamper mode=degrade
+  ShieldHook: block-mode=1
+  ```

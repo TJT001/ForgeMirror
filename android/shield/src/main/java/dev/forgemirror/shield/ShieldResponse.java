@@ -29,9 +29,10 @@ final class ShieldResponse {
             String selected = ShieldServerConfig.responseFor(
                     context, finding.ruleId, mode);
             Log.w(TAG, "response rule=" + finding.ruleId + " mode=" + selected);
-            if ("block".equals(selected)) {
+            if ("block".equals(selected) || "degrade".equals(selected)) {
                 try {
-                    ShieldNativeFileHook.setBlocked(true);
+                    ShieldNativeFileHook.setBlockMode(
+                            "block".equals(selected) ? 2 : 1);
                 } catch (Throwable error) {
                     Log.w(TAG, "block unavailable: " + error);
                 }

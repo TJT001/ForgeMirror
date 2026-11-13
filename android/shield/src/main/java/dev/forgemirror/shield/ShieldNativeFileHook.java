@@ -17,13 +17,13 @@ final class ShieldNativeFileHook {
         return nativeInstalled();
     }
 
-    static void setBlocked(boolean blocked) {
-        nativeSetBlocked(blocked);
+    static void setBlockMode(int mode) {
+        nativeSetBlockMode(mode);
     }
 
     private static native int nativeConfigure(String dataDir, boolean enforce);
 
     private static native boolean nativeInstalled();
 
-    private static native void nativeSetBlocked(boolean blocked);
+    private static native void nativeSetBlockMode(int mode);
 }
