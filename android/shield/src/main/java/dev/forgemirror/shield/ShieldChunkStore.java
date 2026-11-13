@@ -120,7 +120,11 @@ final class ShieldChunkStore implements AutoCloseable {
     }
 
     private void replaceAll(byte[] plaintext) throws IOException {
-        setLength(plaintext.length);
+        boolean changedAny = false;
+        if (plaintext.length != length) {
+            setLength(plaintext.length);
+            changedAny = true;
+        }
         byte[] current = new byte[chunkSize];
         for (int index = 0; index < chunkCount; index++) {
             int offset = index * chunkSize;
@@ -138,9 +142,10 @@ final class ShieldChunkStore implements AutoCloseable {
             }
             if (!same) {
                 write(offset, plaintext, offset, length);
+                changedAny = true;
             }
         }
-        changed = true;
+        changed = changedAny;
     }
 
     static boolean matches(File file) {

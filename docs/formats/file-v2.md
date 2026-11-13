@@ -78,6 +78,7 @@ chunk_len = min(chunk_size, plaintext_len - i * chunk_size)
    先逐块比较，只把差异块标记为脏。持久化时只把**脏块**写入增量 WAL：
    - 新文件/目标缺失：WAL 标记 `full`，包含全部块；
    - 已有目标：WAL 只包含脏块、扩展块和被截断清零的末块；
+   - 若整体写入与目标逐块一致，则跳过 WAL 和 fsync；
    - 写 `<name>.fmf2.wal.tmp`（新头部 + 记录 + footer）并 `fsync`；
    - 原子 rename 为 `<name>.fmf2.wal`，`fsync` 目录，作为提交点；
    - 把 WAL 中的新头部和脏块原位写入目标，`setLength` 到新长度，`fsync`；

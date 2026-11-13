@@ -13,7 +13,7 @@
 | `ShieldChunkStore.recover` | 获取文件锁后、读取目标前执行；先处理旧 `.fmf2.commit`，再处理 WAL |
 | `applyWalFile` | 校验 footer SHA-256、新头部 AEAD、每条块 AEAD；增量 WAL 再校验 `base_file_id`；校验通过后写头部/块并 `setLength` |
 | `prepareWal` / `prepareWalPatch` | 测试用 WAL 生成入口（完整镜像 / 单块增量） |
-| `writeAll` | 已有合法目标先逐块比较，只把差异块标记 dirty，再由 WAL 记录；目标损坏/缺失才走 full WAL |
+| `writeAll` | 已有合法目标先逐块比较，只把差异块标记 dirty，再由 WAL 记录；无差异时跳过 WAL/fsync；目标损坏/缺失才走 full WAL |
 | `ShieldFiles.ShieldFileOutputStream` | `close()` 幂等，避免 finalizer 二次 close 写入已关闭流 |
 
 ## WAL 格式（`FMW1`）
