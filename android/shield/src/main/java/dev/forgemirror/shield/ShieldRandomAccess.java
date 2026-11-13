@@ -16,13 +16,13 @@ import java.nio.file.StandardCopyOption;
 import java.util.Arrays;
 
 /**
- * Random-access view over an FMF1-encrypted file. Contents are decrypted into
- * memory on open and re-encrypted atomically on close, so seek/read/write/
- * setLength keep caller-visible file semantics for one process. mmap, file
- * locks, file descriptors and cross-process access are not covered.
+ * Random-access view over an encrypted file. FMF2 files use chunked AEAD and
+ * touch only the modified chunks on persist; legacy FMF1/plaintext files are
+ * read through an in-memory view and migrate to FMF2 on the first write.
  *
  * Android's RandomAccessFile marks its I/O methods final, so this is a
  * composed type implementing DataInput/DataOutput rather than a subclass.
+ * mmap, file descriptors and cross-process writes are not covered.
  */
 public final class ShieldRandomAccess implements DataInput, DataOutput, Closeable {
     private static final int MAX_BUFFER = 64 << 20;
@@ -31,6 +31,7 @@ public final class ShieldRandomAccess implements DataInput, DataOutput, Closeabl
     private final byte[] key;
     private final boolean encrypted;
     private final boolean writable;
+    private final ShieldChunkStore store;
     private final DataInputStream input;
     private final DataOutputStream output;
 
@@ -68,13 +69,21 @@ public final class ShieldRandomAccess implements DataInput, DataOutput, Closeabl
         if (!writable && !target.isFile()) {
             throw new FileNotFoundException(target.getPath());
         }
-        byte[] plaintext = target.isFile() ? readPlaintext() : new byte[0];
-        if (plaintext.length > MAX_BUFFER) {
-            throw new IOException("file too large for random-access buffer");
+        if (encrypted && (!target.isFile() || ShieldChunkStore.matches(target))) {
+            this.store = ShieldChunkStore.open(target, key, mode);
+            this.length = store.length();
+            this.data = null;
+        } else {
+            this.store = null;
+            byte[] plaintext = target.isFile() ? readPlaintext() : new byte[0];
+            if (plaintext.length > MAX_BUFFER) {
+                throw new IOException("file too large for random-access buffer");
+            }
+            this.data = new byte[Math.max(64, plaintext.length)];
+            System.arraycopy(plaintext, 0, data, 0, plaintext.length);
+            this.length = plaintext.length;
+            this.dirty = writable && !target.isFile();
         }
-        this.data = new byte[Math.max(64, plaintext.length)];
-        System.arraycopy(plaintext, 0, data, 0, plaintext.length);
-        this.length = plaintext.length;
 
         InputStream reader = new InputStream() {
             @Override
@@ -89,14 +98,24 @@ public final class ShieldRandomAccess implements DataInput, DataOutput, Closeabl
 
             @Override
             public long skip(long count) {
-                long skipped = Math.min(Math.max(count, 0), Math.max(0, length - pointer));
-                pointer += skipped;
-                return skipped;
+                try {
+                    long skipped = Math.min(Math.max(count, 0),
+                            Math.max(0, length() - pointer));
+                    pointer += skipped;
+                    return skipped;
+                } catch (IOException error) {
+                    return 0;
+                }
             }
 
             @Override
             public int available() {
-                return (int) Math.min(Math.max(0, length - pointer), Integer.MAX_VALUE);
+                try {
+                    return (int) Math.min(Math.max(0, length() - pointer),
+                            Integer.MAX_VALUE);
+                } catch (IOException error) {
+                    return 0;
+                }
             }
         };
         OutputStream writer = new OutputStream() {
@@ -138,6 +157,15 @@ public final class ShieldRandomAccess implements DataInput, DataOutput, Closeabl
 
     private int readRawByte() throws IOException {
         ensureOpen();
+        if (store != null) {
+            byte[] one = new byte[1];
+            int read = store.read(pointer, one, 0, 1);
+            if (read < 0) {
+                return -1;
+            }
+            pointer += read;
+            return one[0] & 0xff;
+        }
         if (pointer >= length) {
             return -1;
         }
@@ -148,6 +176,13 @@ public final class ShieldRandomAccess implements DataInput, DataOutput, Closeabl
         ensureOpen();
         if (count == 0) {
             return 0;
+        }
+        if (store != null) {
+            int read = store.read(pointer, buffer, offset, count);
+            if (read > 0) {
+                pointer += read;
+            }
+            return read;
         }
         if (pointer >= length) {
             return -1;
@@ -160,6 +195,11 @@ public final class ShieldRandomAccess implements DataInput, DataOutput, Closeabl
 
     private void writeRawByte(int oneByte) throws IOException {
         ensureWritable();
+        if (store != null) {
+            store.write(pointer, new byte[]{(byte) oneByte}, 0, 1);
+            pointer++;
+            return;
+        }
         ensureCapacity(pointer + 1);
         data[(int) pointer++] = (byte) oneByte;
         length = Math.max(length, pointer);
@@ -168,6 +208,11 @@ public final class ShieldRandomAccess implements DataInput, DataOutput, Closeabl
 
     private void writeRaw(byte[] buffer, int offset, int count) throws IOException {
         ensureWritable();
+        if (store != null) {
+            store.write(pointer, buffer, offset, count);
+            pointer += count;
+            return;
+        }
         ensureCapacity(pointer + count);
         System.arraycopy(buffer, offset, data, (int) pointer, count);
         pointer += count;
@@ -190,7 +235,7 @@ public final class ShieldRandomAccess implements DataInput, DataOutput, Closeabl
 
     public void seek(long position) throws IOException {
         ensureOpen();
-        if (position < 0 || position > MAX_BUFFER) {
+        if (position < 0 || position > maxLength()) {
             throw new IOException("invalid seek position: " + position);
         }
         pointer = position;
@@ -198,23 +243,27 @@ public final class ShieldRandomAccess implements DataInput, DataOutput, Closeabl
 
     public long length() throws IOException {
         ensureOpen();
-        return length;
+        return store != null ? store.length() : length;
     }
 
     public void setLength(long newLength) throws IOException {
         ensureWritable();
-        if (newLength < 0 || newLength > MAX_BUFFER) {
+        if (newLength < 0 || newLength > maxLength()) {
             throw new IOException("invalid length: " + newLength);
         }
-        ensureCapacity(newLength);
-        if (newLength < length) {
-            Arrays.fill(data, (int) newLength, (int) length, (byte) 0);
+        if (store != null) {
+            store.setLength(newLength);
+        } else {
+            ensureCapacity(newLength);
+            if (newLength < length) {
+                Arrays.fill(data, (int) newLength, (int) length, (byte) 0);
+            }
+            length = newLength;
+            dirty = true;
         }
-        length = newLength;
-        if (pointer > length) {
-            pointer = length;
+        if (pointer > newLength) {
+            pointer = newLength;
         }
-        dirty = true;
     }
 
     @Override
@@ -230,7 +279,7 @@ public final class ShieldRandomAccess implements DataInput, DataOutput, Closeabl
     @Override
     public int skipBytes(int count) throws IOException {
         ensureOpen();
-        int skipped = (int) Math.min(Math.max(count, 0), Math.max(0, length - pointer));
+        int skipped = (int) Math.min(Math.max(count, 0), Math.max(0, length() - pointer));
         pointer += skipped;
         return skipped;
     }
@@ -373,11 +422,17 @@ public final class ShieldRandomAccess implements DataInput, DataOutput, Closeabl
         }
         closed = true;
         try {
+            if (store != null) {
+                store.close();
+                return;
+            }
             if (writable && dirty) {
                 byte[] plaintext = Arrays.copyOf(data, (int) length);
-                byte[] blob = encrypted
-                        ? ShieldCrypto.fileEncrypt(plaintext, key) : plaintext;
-                writeAtomic(blob);
+                if (encrypted) {
+                    ShieldChunkStore.writeAll(target, key, plaintext);
+                } else {
+                    writeAtomic(plaintext);
+                }
             }
         } catch (Exception error) {
             throw new IOException("persist failed: " + target, error);
@@ -416,6 +471,10 @@ public final class ShieldRandomAccess implements DataInput, DataOutput, Closeabl
             capacity = capacity < 1 << 20 ? capacity * 2 : capacity + (1 << 20);
         }
         data = Arrays.copyOf(data, Math.min(capacity, MAX_BUFFER));
+    }
+
+    private long maxLength() {
+        return store != null ? ShieldChunkStore.MAX_LENGTH : MAX_BUFFER;
     }
 
     private void ensureOpen() throws IOException {

@@ -66,6 +66,15 @@ public final class HarnessStorage {
             Log.w(TAG, "encrypted rename failed");
         }
 
+        try (dev.forgemirror.shield.ShieldRandomAccess random =
+                     ShieldStorageFacade.openRandomAccessFile(
+                             context, "harness_ra_renamed.txt", "rw")) {
+            random.seek(1);
+            random.write("Q".getBytes(StandardCharsets.UTF_8));
+        } catch (IOException error) {
+            Log.e(TAG, "covered random rewrite failed", error);
+        }
+
         // Direct stream, no context openFileOutput call site: demonstrates the
         // interception boundary — this file stays plaintext by design in P1-D.
         File plain = new File(context.getFilesDir(), "harness_plain.txt");
@@ -119,7 +128,7 @@ public final class HarnessStorage {
             random.seek(1);
             int read = random.read(sample);
             randomOk = randomLength == 6 && read == 3
-                    && "12X".equals(new String(sample, StandardCharsets.UTF_8));
+                    && "Q2X".equals(new String(sample, StandardCharsets.UTF_8));
         } catch (IOException error) {
             Log.e(TAG, "covered random access read failed", error);
         }
