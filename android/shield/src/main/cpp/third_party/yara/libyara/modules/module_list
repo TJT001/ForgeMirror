@@ -1,0 +1,9 @@
+MODULE(tests)
+MODULE(math)
+MODULE(time)
+MODULE(console)
+MODULE(string)
+
+#ifdef DEX_MODULE
+MODULE(dex)
+#endif

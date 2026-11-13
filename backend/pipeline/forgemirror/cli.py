@@ -10,6 +10,12 @@ import typer
 from .intake import PROFILES, SIGNING_MODES, run_intake
 from .inventory import run_inventory
 from .gate import run_gate
+from .formats.file import (
+    DEFAULT_CHUNK_SIZE,
+    FileFormatError,
+    derive_file_key,
+    migrate as migrate_encrypted_file,
+)
 from .pipeline import BuildOptions, run_build
 from .protect import ProtectOptions, protect
 from .tools import AndroidTools, ToolError
@@ -158,6 +164,85 @@ def protect_apk(
     _echo({**result, "gate": gate})
     if not gate["passed"]:
         raise typer.Exit(1)
+
+
+@app.command("migrate-file")
+def migrate_file(
+    input: Path = typer.Option(..., "--input", exists=True, dir_okay=False, readable=True),
+    out: Path = typer.Option(..., "--out", dir_okay=False, writable=True),
+    key_file: Path | None = typer.Option(
+        None, "--key-file", help="raw 32-byte file key"
+    ),
+    k_content: Path | None = typer.Option(
+        None, "--k-content", help="container content key to derive the file key"
+    ),
+    build_id: str | None = typer.Option(
+        None, "--build-id", help="build id used with --k-content"
+    ),
+    chunk_size: int = typer.Option(DEFAULT_CHUNK_SIZE, "--chunk-size"),
+    assume_plaintext: bool = typer.Option(False, "--assume-plaintext"),
+) -> None:
+    """Migrate an FMF1 (or plaintext) file to FMF2."""
+    if key_file is not None:
+        key = key_file.read_bytes()
+    elif k_content is not None and build_id:
+        key = derive_file_key(k_content.read_bytes(), build_id)
+    else:
+        typer.echo("need --key-file or --k-content with --build-id", err=True)
+        raise typer.Exit(2)
+    if len(key) != 32:
+        typer.echo("file key must be 32 bytes", err=True)
+        raise typer.Exit(2)
+    try:
+        result = migrate_encrypted_file(
+            input, out, key, chunk_size=chunk_size,
+            assume_plaintext=assume_plaintext,
+        )
+    except FileFormatError as error:
+        typer.echo(f"migrate failed: {error}", err=True)
+        raise typer.Exit(1) from error
+    _echo(result)
+
+
+@app.command("yara-check")
+def yara_check(
+    rules_file: Path | None = typer.Option(None, "--rules", exists=True, dir_okay=False),
+) -> None:
+    """Compile YARA rules (default: the nine demo rules)."""
+    from .formats import yara_rules
+
+    source = rules_file.read_text() if rules_file else yara_rules.NINE_RULES
+    try:
+        yara_rules.compile_rules(source)
+    except (yara_rules.YaraUnavailable, yara_rules.YaraRuleError) as error:
+        typer.echo(f"yara error: {error}", err=True)
+        raise typer.Exit(1) from error
+    _echo({"ok": True, "rules_file": str(rules_file) if rules_file else "builtin"})
+
+
+@app.command("yara-scan")
+def yara_scan(
+    apk: Path = typer.Option(..., "--apk", exists=True, dir_okay=False),
+    rules_file: Path | None = typer.Option(None, "--rules", exists=True, dir_okay=False),
+) -> None:
+    """Scan an APK's native libraries with YARA rules."""
+    from .formats import yara_rules
+
+    source = rules_file.read_text() if rules_file else yara_rules.NINE_RULES
+    try:
+        matches = yara_rules.scan_apk(apk, source=source)
+    except (yara_rules.YaraUnavailable, yara_rules.YaraRuleError) as error:
+        typer.echo(f"yara error: {error}", err=True)
+        raise typer.Exit(1) from error
+    _echo(
+        {
+            "ok": True,
+            "matches": [
+                {"rule": match.rule, "entry": match.entry, "sha256": match.sha256}
+                for match in matches
+            ],
+        }
+    )
 
 
 @app.command()

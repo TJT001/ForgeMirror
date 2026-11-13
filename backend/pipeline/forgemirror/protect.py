@@ -19,6 +19,7 @@ from .formats import axml
 from .formats.container import open_container
 from .formats.policy import pack_policy
 from .formats.rules import pack_rules
+from .formats.yara_rules import RUNTIME_RULES
 from .s6 import (
     build_envelope,
     collect_artifacts,
@@ -50,6 +51,7 @@ DEFAULT_RULES = {
     "schema": "forgemirror.rules/1",
     "version": 1,
     "min_shell_version": "0.1.0",
+    "yara": RUNTIME_RULES,
     "rules": [
         {
             "id": "demo_jni",

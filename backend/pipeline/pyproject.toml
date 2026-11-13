@@ -10,6 +10,9 @@ dependencies = [
     "psycopg[binary]>=3.2.0",
 ]
 
+[project.optional-dependencies]
+yara = ["yara-python>=4.5.4"]
+
 [project.scripts]
 forgemirror = "forgemirror.cli:app"
 

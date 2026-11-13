@@ -36,13 +36,14 @@
 
 ## 3. 载荷（原型）
 
-载荷是 UTF-8 JSON，当前原型使用 all/any 字符串条件；YARA 编译载荷后续替换，不改变外层信封。
+载荷是 UTF-8 JSON。`yara` 存在时壳内 YARA 4.5.4 引擎编译并优先使用；否则回退到 all/any 字符串条件。外层信封不变。
 
 ```json
 {
   "schema": "forgemirror.rules/1",
   "version": 1,
   "min_shell_version": "0.1.0",
+  "yara": "rule demo { strings: $a = \"alpha\" condition: $a }",
   "rules": [
     {"id": "demo_all", "logic": "all", "strings": ["alpha", "beta"]},
     {"id": "demo_any", "logic": "any", "strings": ["gamma", "delta"]}
@@ -54,19 +55,20 @@
 
 - `rules` 1..256 条；每条 1..32 个非空字符串；
 - `logic` 仅支持 `all` / `any`；
+- `yara` 可选，UTF-8 源码，上限 64 KiB；编译失败时不加载规则包；
 - 解析失败、签名失败或版本不满足时整包拒绝，不部分加载；
 - 研究侧九条规则只作研究证据；产品规则独立编写并记录特征来源与许可。
 
 ## 4. 运行时
 
-- 壳在 bootstrap 后异步扫描 APK 内 `lib/**/*.so`（上限 64 MB），按 all/any 匹配并记录命中；
-- 扫描不阻塞首帧；命中事件目前写 logcat，事件队列/上报在 P3 后续实现；
-- 规则包纳入清单签名产物，S8 闸门验证签名和密钥绑定。
+- 壳在 bootstrap 后异步扫描 APK 内 `lib/**/*.so`（上限 64 MB）；
+- `yara` 存在时使用壳内 YARA 4.5.4（JNI）扫描，否则按 all/any 字符串匹配；
+- 命中写入加密事件队列并批量上报；远端进程不重复上报；
+- 扫描不阻塞首帧；规则包纳入清单签名产物，S8 闸门验证签名和密钥绑定。
 
-## 5. 待 P3 后续
+## 5. 待后续
 
-- YARA 引擎（固定版本）与编译载荷；
-- 九条规则语义的产品化与正反例；
+- 研究侧九条规则的真实语义与产品规则正反例；
 - 规则热更新、版本门控与原子替换；
 - 内存扫描与 `/proc/self/maps` 候选管理；
 - 规则版本与清单 `rule_version` 的一致性。

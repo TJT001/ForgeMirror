@@ -35,9 +35,11 @@ final class ShieldRules {
     private static final String TAG = "ShieldRules";
 
     private final List<Rule> rules;
+    private final ShieldYara yara;
 
-    private ShieldRules(List<Rule> rules) {
+    private ShieldRules(List<Rule> rules, ShieldYara yara) {
         this.rules = rules;
+        this.yara = yara;
     }
 
     static ShieldRules load(Context context, ShieldConfig config, byte[] kContent) {
@@ -93,7 +95,17 @@ final class ShieldRules {
                 rules.add(new Rule(item.getString("id"), all, needles));
             }
             Log.i(TAG, "loaded " + rules.size() + " rules");
-            return new ShieldRules(rules);
+            ShieldYara yara = null;
+            String yaraSource = json.optString("yara", "");
+            if (!yaraSource.isEmpty()) {
+                try {
+                    yara = new ShieldYara(yaraSource);
+                    Log.i(TAG, "YARA rules compiled");
+                } catch (Throwable error) {
+                    Log.w(TAG, "YARA unavailable: " + error);
+                }
+            }
+            return new ShieldRules(rules, yara);
         } catch (Exception error) {
             Log.w(TAG, "rules unavailable: " + error);
             return null;
@@ -124,10 +136,17 @@ final class ShieldRules {
                 byte[] data = read(archive.getInputStream(entry),
                         Math.min(entry.getSize(), budget));
                 budget -= data.length;
-                for (Rule rule : rules) {
-                    if (rule.matches(data)) {
-                        matches.add(new Match(rule.id, entry.getName(), sha256(data)));
-                        Log.w(TAG, "rule matched: " + rule.id + " in " + entry.getName());
+                if (yara != null) {
+                    for (String id : yara.scan(data)) {
+                        matches.add(new Match(id, entry.getName(), sha256(data)));
+                        Log.w(TAG, "yara matched: " + id + " in " + entry.getName());
+                    }
+                } else {
+                    for (Rule rule : rules) {
+                        if (rule.matches(data)) {
+                            matches.add(new Match(rule.id, entry.getName(), sha256(data)));
+                            Log.w(TAG, "rule matched: " + rule.id + " in " + entry.getName());
+                        }
                     }
                 }
                 if (budget <= 0) {
