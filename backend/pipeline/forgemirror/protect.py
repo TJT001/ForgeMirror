@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 import tempfile
 import uuid
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from .apk import elf_arch
 from .formats import axml
 from .formats.container import open_container
 from .formats.policy import pack_policy
@@ -58,6 +60,7 @@ class ProtectOptions:
     no_key_asset: bool = False
     key_dir: Path = Path("artifacts/keys")
     alg: str = "ecdsa-p256-sha256"
+    strip_customer_libs: bool = True
 
 
 def _stub_from_aar(aar: Path, tools: AndroidTools, tmp: Path) -> tuple[bytes, dict[str, bytes]]:
@@ -107,6 +110,18 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
 
     with zipfile.ZipFile(options.apk) as archive:
         original_manifest = archive.read("AndroidManifest.xml")
+        for info in archive.infolist():
+            if not info.filename.startswith("lib/") or not info.filename.endswith(".so"):
+                continue
+            parts = info.filename.split("/")
+            if len(parts) < 3:
+                continue
+            expected = "armeabi-v7a" if parts[1] == "armeabi" else parts[1]
+            arch = elf_arch(archive.read(info.filename)[:20])
+            if arch != expected:
+                raise SystemExit(
+                    f"ABI mismatch in {info.filename}: ELF {arch} != dir {expected}"
+                )
     document = axml.parse(original_manifest)
     package = document.package_name()
     if not package:
@@ -137,9 +152,25 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
     policy_alg = "ecdsa-p256-sha256-raw" if options.alg == "ecdsa-p256-sha256" else options.alg
 
     options.out.parent.mkdir(parents=True, exist_ok=True)
+    warnings: list[str] = []
     with tempfile.TemporaryDirectory(prefix="fm-protect-") as tmp:
         tmp = Path(tmp)
         stub_dex, shield_libs = _stub_from_aar(options.aar, tools, tmp)
+
+        stripped_libs: dict[str, bytes] = {}
+        if options.strip_customer_libs:
+            with zipfile.ZipFile(options.apk) as archive:
+                for info in archive.infolist():
+                    if not info.filename.startswith("lib/") or not info.filename.endswith(".so"):
+                        continue
+                    if info.filename.endswith(("libshield_boot.so", "libshield_core.so")):
+                        continue
+                    try:
+                        stripped_libs[info.filename] = tools.strip_so(
+                            archive.read(info.filename), Path(info.filename).name
+                        )
+                    except Exception as error:
+                        warnings.append(f"strip failed for {info.filename}: {error}")
 
         config = {
             "schema": "forgemirror.shield.config/1",
@@ -153,6 +184,8 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             "policy": "shield/policy.pkg",
             "build_id": options.build_id,
             "auth_url": options.auth_url,
+            "app_id": package,
+            "build_salt": secrets.token_hex(16),
         }
         policy_pkg = pack_policy(
             DEFAULT_POLICY,
@@ -174,6 +207,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
         }
         if not options.no_key_asset:
             entries["assets/shield/k_content.bin"] = k_content
+        entries.update(stripped_libs)
         entries.update(shield_libs)
 
         injected = tmp / "injected.apk"
@@ -207,11 +241,16 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
 
         with_manifest = tmp / "manifest.apk"
         inject(injected, with_manifest, {"assets/shield/manifest.sig": envelope})
-        aligned = tmp / "aligned.apk"
-        tools.align_apk(with_manifest, aligned)
-        tools.sign_debug(aligned, options.out)
+        if options.signing_mode == "customer_local":
+            tools.align_apk(with_manifest, options.out)
+            signed = False
+        else:
+            aligned = tmp / "aligned.apk"
+            tools.align_apk(with_manifest, aligned)
+            tools.sign_debug(aligned, options.out)
+            signed = True
 
-    verify_output = tools.verify(options.out)
+    signer = parse_signer(tools.verify(options.out)) if signed else None
     meta = {
         "ok": True,
         "apk": str(options.out),
@@ -226,7 +265,11 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
         "auth_url": options.auth_url or None,
         "key_embedded": not options.no_key_asset,
         "algorithm": options.alg,
-        "signer_sha256": parse_signer(verify_output),
+        "signing_mode": options.signing_mode,
+        "signed": signed,
+        "stripped_libs": len(stripped_libs),
+        "warnings": warnings,
+        "signer_sha256": signer,
     }
     options.out.with_suffix(".protect.json").write_text(
         json.dumps(meta, indent=2, sort_keys=True, ensure_ascii=False) + "\n"

@@ -188,6 +188,31 @@ class AndroidTools:
             raise ToolError(f"d8 did not produce {dex}")
         return dex
 
+    def _llvm_strip(self) -> Path:
+        ndk = self.sdk_root / "ndk"
+        if not ndk.is_dir():
+            raise ToolError(f"Android NDK not found under {self.sdk_root}")
+        versions = sorted(
+            (path for path in ndk.iterdir() if path.is_dir()),
+            key=lambda path: [int(part) if part.isdigit() else part
+                              for part in re.split(r"[.-]", path.name)],
+        )
+        for version in reversed(versions):
+            for host in ("darwin-arm64", "darwin-x86_64", "linux-x86_64", "windows-x86_64"):
+                binary = version / "toolchains" / "llvm" / "prebuilt" / host / "bin" / "llvm-strip"
+                if binary.is_file():
+                    return binary
+        raise ToolError("llvm-strip not found in Android NDK")
+
+    def strip_so(self, data: bytes, name: str = "lib.so") -> bytes:
+        import tempfile
+
+        with tempfile.TemporaryDirectory(prefix="fm-strip-") as tmp:
+            source = Path(tmp) / name
+            source.write_bytes(data)
+            self._run([str(self._llvm_strip()), "--strip-unneeded", str(source)])
+            return source.read_bytes()
+
     def tool_versions(self) -> dict[str, str]:
         versions: dict[str, str] = {"build-tools": self.build_tools_version}
         for name, command in (("aapt2", [str(self.aapt2), "version"]), ("apksigner", [str(self.apksigner), "version"])):
