@@ -33,6 +33,7 @@ class DecoyResult:
     needed: int
     decoy_size: int = 0
     real_size: int = 0
+    names_corrupted: bool = False
 
 
 def _u16(data: bytes, offset: int) -> int:
@@ -47,7 +48,8 @@ def _u64(data: bytes, offset: int) -> int:
     return struct.unpack_from("<Q", data, offset)[0]
 
 
-def add_dynamic_decoy(data: bytes, patch_section: bool = True) -> tuple[bytes, DecoyResult]:
+def add_dynamic_decoy(data: bytes, patch_section: bool = True,
+                      corrupt_section_names: bool = True) -> tuple[bytes, DecoyResult]:
     if len(data) < 0x40 or data[:4] != ELF_MAGIC:
         raise ElfError("not an ELF file")
     if data[4] not in (1, 2):
@@ -60,9 +62,12 @@ def add_dynamic_decoy(data: bytes, patch_section: bool = True) -> tuple[bytes, D
         result, info = _decoy64(buffer)
     else:
         result, info = _decoy32(buffer)
-    if info.applied and patch_section:
+    if info.applied:
         mutable = bytearray(result)
-        _patch_dynamic_section(mutable, data[4], info.decoy_offset, info.real_size)
+        if patch_section:
+            _patch_dynamic_section(mutable, data[4], info.decoy_offset, info.real_size)
+        if corrupt_section_names:
+            info.names_corrupted = _corrupt_section_names(mutable, data[4])
         result = bytes(mutable)
     return result, info
 
@@ -162,6 +167,33 @@ def _build_decoy(entries: list[tuple[int, int]], entry_size: int,
 
 def _count_needed(entries: list[tuple[int, int]]) -> int:
     return sum(1 for tag, _ in entries if tag == DT_NEEDED)
+
+
+def _corrupt_section_names(buffer: bytearray, elf_class: int) -> bool:
+    if elf_class == 2:
+        shoff = _u64(buffer, 0x28)
+        shentsize = _u16(buffer, 0x3A)
+        shnum = _u16(buffer, 0x3C)
+        shstrndx = _u16(buffer, 0x3E)
+        if shoff == 0 or shstrndx >= shnum:
+            return False
+        header = shoff + shstrndx * shentsize
+        offset = _u64(buffer, header + 0x18)
+        size = _u64(buffer, header + 0x20)
+    else:
+        shoff = _u32(buffer, 0x20)
+        shentsize = _u16(buffer, 0x2E)
+        shnum = _u16(buffer, 0x30)
+        shstrndx = _u16(buffer, 0x32)
+        if shoff == 0 or shstrndx >= shnum:
+            return False
+        header = shoff + shstrndx * shentsize
+        offset = _u32(buffer, header + 0x10)
+        size = _u32(buffer, header + 0x14)
+    if size == 0 or offset + size > len(buffer):
+        return False
+    buffer[offset:offset + size] = b"\xA5" * size
+    return True
 
 
 def _patch_dynamic_section(buffer: bytearray, elf_class: int,

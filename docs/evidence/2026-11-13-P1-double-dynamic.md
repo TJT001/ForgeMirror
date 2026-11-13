@@ -10,9 +10,12 @@
 3. 把 `PT_DYNAMIC.p_offset` 指向诱饵，**保留 `p_vaddr` 指向真实表**；
 4. 把 `.dynamic` section 的 `sh_offset` 指向诱饵，`sh_size` 保留原 `p_filesz`；
 5. 保留 section header table 与 `e_shstrndx`，避免 linker 校验失败；
-6. 诱饵后按 `p_filesz` 补零，保证 `p_offset + p_filesz` 不越界。
+6. 诱饵后按 `p_filesz` 补零，保证 `p_offset + p_filesz` 不越界；
+7. 保留 `e_shstrndx` 索引合法，但把 section header string table 内容填成 `0xA5`
+   （非 NUL 结尾），使静态工具无法解析节名；
+8. `--keep-section-names` 可关闭第 7 步，`--no-decoy-dynamic` 可整体关闭。
 
-支持 ELF64 与 ELF32；`protect --no-decoy-dynamic` 可关闭。
+支持 ELF64 与 ELF32。
 
 ## 为什么保留 section size
 
@@ -58,6 +61,18 @@ ShieldRuntime: bootstrap ok state=4
 
 即 linker 按 `p_vaddr` 读真实动态表，boot/hook/shadowhook/yara 全部正常加载。
 
+section 名表破坏后：
+
+```text
+llvm-readelf -S libshield_boot.so
+warning: SHT_STRTAB string table section [index 21] is non-null terminated
+[ 0] <no-strings> ...
+[ 1] <no-strings> ...
+```
+
+`llvm-readelf -d` 仍从 `.dynamic` section（offset 已指向诱饵）读出上面的 8 项；
+`--dyn-syms` 会警告无法取得 SHT_DYNSYM 节名，但符号内容仍可通过 section type 访问。
+
 ### 测试
 
 ```text
@@ -70,8 +85,9 @@ Go build/vet 通过
 ## 限制
 
 1. 只处理 shield 自有明文 so；core 已是加密 asset，业务 .so 未处理。
-2. section header 仍有效，熟悉 ELF 的分析者可通过 `.dynsym`/`.rela` section 还原；
-   参考壳进一步破坏了 section 名表，本实现选择保留以保证 linker 兼容。
-3. 未实现 `DT_INIT` 自解密、LZSS、I-cache 刷新、内联 syscall 桩。
-4. 诱饵表追加在文件末尾，文件大小增加 `p_filesz` 级别的零填充；不影响 zipalign/签名。
-5. x86/x86_64 的 ELF32/64 逻辑已支持，但 x86 原生 hook 仍不存在。
+2. section header table 与 `e_shstrndx` 索引仍合法（linker 会校验）；名称内容已破坏，
+   但按 section type 扫描 `.dynsym`/`.rela` 的分析器仍能还原符号内容。
+3. 参考壳还配合 `DT_INIT` 自解密/LZSS；本实现只做双表与名表破坏。
+4. 未实现 `DT_INIT` 自解密、LZSS、I-cache 刷新、内联 syscall 桩。
+5. 诱饵表追加在文件末尾，文件大小增加 `p_filesz` 级别的零填充；不影响 zipalign/签名。
+6. x86/x86_64 的 ELF32/64 逻辑已支持，但 x86 原生 hook 仍不存在。

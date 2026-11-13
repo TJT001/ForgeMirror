@@ -93,6 +93,7 @@ class ProtectOptions:
     strip_customer_libs: bool = True
     self_decrypt_core: bool = True
     decoy_dynamic: bool = True
+    corrupt_section_names: bool = True
 
 
 def _stub_from_aar(aar: Path, tools: AndroidTools, tmp: Path) -> tuple[bytes, dict[str, bytes]]:
@@ -218,7 +219,10 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
                 if name.endswith("/libshield_core.so"):
                     continue
                 try:
-                    shield_libs[name], _ = add_dynamic_decoy(shield_libs[name])
+                    shield_libs[name], _ = add_dynamic_decoy(
+                        shield_libs[name],
+                        corrupt_section_names=options.corrupt_section_names,
+                    )
                 except ElfError as error:
                     warnings.append(f"dynamic decoy skipped for {name}: {error}")
         if options.self_decrypt_core:
