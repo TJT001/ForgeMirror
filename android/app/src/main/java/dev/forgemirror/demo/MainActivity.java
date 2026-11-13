@@ -65,6 +65,10 @@ public class MainActivity extends AppCompatActivity {
         try {
             startService(new Intent(this, HarnessService.class));
             startService(new Intent(this, HarnessRemoteService.class));
+            new Thread(() -> HarnessStorage.holdLockFor(
+                    this, "harness_lock.txt", 2000), "harness-lock").start();
+            startService(new Intent(this, HarnessRemoteService.class)
+                    .putExtra("lock_probe", true));
         } catch (IllegalStateException error) {
             Log.w(TAG, "service start not allowed in current state", error);
         }

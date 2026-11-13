@@ -96,6 +96,22 @@ public final class HarnessStorage {
         }
     }
 
+    public static void holdLockFor(Context context, String name, long millis) {
+        try (dev.forgemirror.shield.ShieldRandomAccess random =
+                     ShieldStorageFacade.openRandomAccessFile(context, name, "rw")) {
+            random.seek(random.length());
+            random.write("M".getBytes(StandardCharsets.UTF_8));
+            Log.i(TAG, "lock held name=" + name);
+            try {
+                Thread.sleep(millis);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+        } catch (Exception error) {
+            Log.w(TAG, "lock holder failed: " + error);
+        }
+    }
+
     public static String verify(Context context) {
         SharedPreferences prefs =
                 ShieldStorageFacade.getSharedPreferences(context, "harness_prefs");
@@ -120,6 +136,7 @@ public final class HarnessStorage {
         boolean appendOk = fileText != null && fileText.contains("appended");
 
         boolean randomOk = false;
+        boolean mmapOk = false;
         try (dev.forgemirror.shield.ShieldRandomAccess random =
                      ShieldStorageFacade.openRandomAccessFile(
                              context, "harness_ra_renamed.txt", "r")) {
@@ -129,11 +146,30 @@ public final class HarnessStorage {
             int read = random.read(sample);
             randomOk = randomLength == 6 && read == 3
                     && "Q2X".equals(new String(sample, StandardCharsets.UTF_8));
+
+            java.nio.channels.FileChannel channel = random.getChannel();
+            try {
+                java.nio.MappedByteBuffer mapped =
+                        channel.map(java.nio.channels.FileChannel.MapMode.READ_ONLY,
+                                0, random.length());
+                mmapOk = mapped.get(0) == '0' && mapped.get(5) == 'Z';
+            } finally {
+                channel.close();
+            }
+            java.io.FileDescriptor descriptor = random.getFD();
+            if (descriptor != null) {
+                try {
+                    android.system.Os.close(descriptor);
+                } catch (Exception ignored) {
+                    // Test-only descriptor.
+                }
+            }
         } catch (IOException error) {
             Log.e(TAG, "covered random access read failed", error);
         }
 
         return "readback prefs=" + prefsOk + " counter=" + counter
-                + " file=" + fileOk + " append=" + appendOk + " ra=" + randomOk;
+                + " file=" + fileOk + " append=" + appendOk + " ra=" + randomOk
+                + " mmap=" + mmapOk;
     }
 }

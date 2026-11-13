@@ -1,5 +1,9 @@
 package dev.forgemirror.shield;
 
+import android.os.Build;
+import android.system.ErrnoException;
+import android.system.Os;
+
 import java.io.Closeable;
 import java.io.DataInput;
 import java.io.DataInputStream;
@@ -7,10 +11,12 @@ import java.io.DataOutput;
 import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.File;
+import java.io.FileDescriptor;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.Arrays;
@@ -40,6 +46,7 @@ public final class ShieldRandomAccess implements DataInput, DataOutput, Closeabl
     private long pointer;
     private boolean dirty;
     private boolean closed;
+    private FileDescriptor snapshotDescriptor;
 
     ShieldRandomAccess(File target, byte[] key, String mode) throws IOException {
         this(target, key, mode, true);
@@ -246,6 +253,75 @@ public final class ShieldRandomAccess implements DataInput, DataOutput, Closeabl
         return store != null ? store.length() : length;
     }
 
+    /**
+     * Returns a duplicated read-only descriptor for a plaintext snapshot in an
+     * anonymous memfd. The caller owns and must close it. Changes made through
+     * the descriptor are not written back to the encrypted file.
+     */
+    public FileDescriptor getFD() throws IOException {
+        ensureOpen();
+        try {
+            return Os.dup(snapshotDescriptor());
+        } catch (ErrnoException error) {
+            throw new IOException("descriptor duplication failed", error);
+        }
+    }
+
+    /** Returns a channel over a plaintext snapshot; see {@link #getFD()}. */
+    public FileChannel getChannel() throws IOException {
+        ensureOpen();
+        try {
+            return new java.io.FileInputStream(Os.dup(snapshotDescriptor())).getChannel();
+        } catch (ErrnoException error) {
+            throw new IOException("channel snapshot failed", error);
+        }
+    }
+
+    private synchronized FileDescriptor snapshotDescriptor() throws IOException {
+        if (snapshotDescriptor != null) {
+            return snapshotDescriptor;
+        }
+        if (Build.VERSION.SDK_INT < 27) {
+            throw new IOException("memfd requires API 27");
+        }
+        long total = store != null ? store.length() : length;
+        if (total > Integer.MAX_VALUE) {
+            throw new IOException("file too large for snapshot");
+        }
+        byte[] plaintext = new byte[(int) total];
+        long saved = pointer;
+        try {
+            pointer = 0;
+            int offset = 0;
+            while (offset < plaintext.length) {
+                int read = readRaw(plaintext, offset, plaintext.length - offset);
+                if (read < 0) {
+                    break;
+                }
+                offset += read;
+            }
+        } finally {
+            pointer = saved;
+        }
+        try {
+            FileDescriptor descriptor = Os.memfd_create("forgemirror", 0);
+            int offset = 0;
+            while (offset < plaintext.length) {
+                int written = Os.write(descriptor, plaintext, offset,
+                        plaintext.length - offset);
+                if (written <= 0) {
+                    throw new IOException("memfd write stalled");
+                }
+                offset += written;
+            }
+            Os.lseek(descriptor, 0, android.system.OsConstants.SEEK_SET);
+            snapshotDescriptor = descriptor;
+            return descriptor;
+        } catch (ErrnoException error) {
+            throw new IOException("memfd snapshot failed", error);
+        }
+    }
+
     public void setLength(long newLength) throws IOException {
         ensureWritable();
         if (newLength < 0 || newLength > maxLength()) {
@@ -436,6 +512,15 @@ public final class ShieldRandomAccess implements DataInput, DataOutput, Closeabl
             }
         } catch (Exception error) {
             throw new IOException("persist failed: " + target, error);
+        } finally {
+            if (snapshotDescriptor != null) {
+                try {
+                    Os.close(snapshotDescriptor);
+                } catch (ErrnoException ignored) {
+                    // Best effort.
+                }
+                snapshotDescriptor = null;
+            }
         }
     }
 

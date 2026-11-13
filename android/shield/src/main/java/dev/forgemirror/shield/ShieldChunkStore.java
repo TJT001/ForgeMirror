@@ -6,6 +6,9 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.security.SecureRandom;
@@ -41,6 +44,9 @@ final class ShieldChunkStore implements AutoCloseable {
     private final Map<Integer, byte[]> dirty = new HashMap<>();
 
     private RandomAccessFile source;
+    private RandomAccessFile lockFile;
+    private FileChannel lockChannel;
+    private FileLock lock;
     private byte[] fileId;
     private int chunkSize;
     private long length;
@@ -95,22 +101,79 @@ final class ShieldChunkStore implements AutoCloseable {
                 && !"rws".equals(mode) && !"rwd".equals(mode)) {
             throw new IllegalArgumentException("unsupported mode: " + mode);
         }
-        deleteStaleTemp(target);
-        if (!blank && target.isFile() && target.length() > 0) {
-            source = new RandomAccessFile(target, writable ? "rw" : "r");
-            readHeader();
-        } else {
-            if (!writable) {
-                throw new FileNotFoundException(target.getPath());
+        if (!writable && !target.isFile()) {
+            throw new FileNotFoundException(target.getPath());
+        }
+        File parent = target.getParentFile();
+        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
+            throw new IOException("cannot create " + parent);
+        }
+        acquireLock();
+        try {
+            deleteStaleTemp(target);
+            if (!blank && target.isFile() && target.length() > 0) {
+                source = new RandomAccessFile(target, writable ? "rw" : "r");
+                readHeader();
+            } else {
+                if (!writable) {
+                    throw new FileNotFoundException(target.getPath());
+                }
+                fileId = new byte[16];
+                RANDOM.nextBytes(fileId);
+                chunkSize = DEFAULT_CHUNK_SIZE;
+                length = 0;
+                persistedLength = 0;
+                chunkCount = 0;
+                persistedCount = 0;
+                changed = true;
             }
-            fileId = new byte[16];
-            RANDOM.nextBytes(fileId);
-            chunkSize = DEFAULT_CHUNK_SIZE;
-            length = 0;
-            persistedLength = 0;
-            chunkCount = 0;
-            persistedCount = 0;
-            changed = true;
+        } catch (IOException | RuntimeException error) {
+            releaseLock();
+            throw error;
+        }
+    }
+
+    private void acquireLock() throws IOException {
+        File lockPath = lockPath(target);
+        lockFile = new RandomAccessFile(lockPath, "rw");
+        lockChannel = lockFile.getChannel();
+        try {
+            lock = writable
+                    ? lockChannel.lock()
+                    : lockChannel.lock(0, Long.MAX_VALUE, true);
+        } catch (OverlappingFileLockException error) {
+            releaseLock();
+            throw new IOException("file is already open in this process: " + target,
+                    error);
+        }
+    }
+
+    private void releaseLock() {
+        if (lock != null) {
+            try {
+                if (lock.isValid()) {
+                    lock.release();
+                }
+            } catch (IOException ignored) {
+                // Channel close below releases the OS lock.
+            }
+            lock = null;
+        }
+        if (lockChannel != null) {
+            try {
+                lockChannel.close();
+            } catch (IOException ignored) {
+                // Best effort.
+            }
+            lockChannel = null;
+        }
+        if (lockFile != null) {
+            try {
+                lockFile.close();
+            } catch (IOException ignored) {
+                // Best effort.
+            }
+            lockFile = null;
         }
     }
 
@@ -223,6 +286,7 @@ final class ShieldChunkStore implements AutoCloseable {
                 source.close();
                 source = null;
             }
+            releaseLock();
         }
     }
 
@@ -441,6 +505,10 @@ final class ShieldChunkStore implements AutoCloseable {
 
     private static File temp(File target) {
         return new File(target.getParentFile(), target.getName() + ".fmf2.tmp");
+    }
+
+    private static File lockPath(File target) {
+        return new File(target.getParentFile(), "." + target.getName() + ".lock");
     }
 
     private static void deleteStaleTemp(File target) {

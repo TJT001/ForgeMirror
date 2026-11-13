@@ -17,6 +17,19 @@ public final class HarnessRemoteService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.i(TAG, "onStartCommand pid=" + Process.myPid());
+        if (intent != null && intent.getBooleanExtra("lock_probe", false)) {
+            long start = android.os.SystemClock.elapsedRealtime();
+            try (dev.forgemirror.shield.ShieldRandomAccess random =
+                         ShieldStorageFacade.openRandomAccessFile(
+                                 this, "harness_lock.txt", "rw")) {
+                long waited = android.os.SystemClock.elapsedRealtime() - start;
+                random.seek(random.length());
+                random.write("R".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                Log.i(TAG, "lock probe waitMs=" + waited + " len=" + random.length());
+            } catch (Exception error) {
+                Log.w(TAG, "lock probe failed: " + error);
+            }
+        }
         try (dev.forgemirror.shield.ShieldRandomAccess random =
                      ShieldStorageFacade.openRandomAccessFile(
                              this, "harness_ra_renamed.txt", "r")) {
