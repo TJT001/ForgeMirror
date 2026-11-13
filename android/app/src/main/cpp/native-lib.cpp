@@ -151,6 +151,40 @@ Java_dev_forgemirror_demo_MainActivity_nativeProbeWriteText(
 }
 
 extern "C" JNIEXPORT jint JNICALL
+Java_dev_forgemirror_demo_MainActivity_nativeProbeDupWrite(
+        JNIEnv* env,
+        jobject /* this */,
+        jstring path,
+        jstring value) {
+    const char* text = env->GetStringUTFChars(path, nullptr);
+    const char* data = env->GetStringUTFChars(value, nullptr);
+    if (text == nullptr || data == nullptr) {
+        return -1;
+    }
+    int fd = open(text, O_RDWR);
+    int error = 0;
+    if (fd >= 0) {
+        int copy = dup(fd);
+        if (copy < 0) {
+            error = errno;
+            close(fd);
+        } else {
+            if (lseek(copy, 0, SEEK_SET) < 0 ||
+                ::write(copy, data, strlen(data)) < 0) {
+                error = errno;
+            }
+            close(fd);
+            close(copy);
+        }
+    } else {
+        error = errno;
+    }
+    env->ReleaseStringUTFChars(value, data);
+    env->ReleaseStringUTFChars(path, text);
+    return error;
+}
+
+extern "C" JNIEXPORT jint JNICALL
 Java_dev_forgemirror_demo_MainActivity_nativeProbeMmapWrite(
         JNIEnv* env,
         jobject /* this */,

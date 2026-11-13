@@ -60,7 +60,9 @@ final class ShieldNativeIo {
                 return -1;
             }
             android.os.ParcelFileDescriptor descriptor = writeMemfd(plaintext);
-            int fd = descriptor.getFd();
+            ParcelFileDescriptor exported =
+                    ParcelFileDescriptor.dup(descriptor.getFileDescriptor());
+            int fd = exported.detachFd();
             synchronized (ShieldNativeIo.class) {
                 OPEN.put(fd, new State(target, writable, key, descriptor));
             }
@@ -81,39 +83,86 @@ final class ShieldNativeIo {
         return relative != null && ShieldRuntime.protects(relative);
     }
 
+    static synchronized void rememberDup(int oldFd, int newFd) {
+        State state = OPEN.get(oldFd);
+        if (state == null) {
+            return;
+        }
+        State previous = OPEN.get(newFd);
+        if (previous != null && previous != state) {
+            previous.refs--;
+            if (previous.refs <= 0) {
+                try {
+                    previous.descriptor.close();
+                } catch (Exception ignored) {
+                    // The replacement fd was already detached.
+                }
+            }
+        }
+        OPEN.put(newFd, state);
+        state.refs++;
+    }
+
+    static synchronized void forgetDup(int fd) {
+        State state = OPEN.remove(fd);
+        if (state == null) {
+            return;
+        }
+        state.refs--;
+        if (state.refs <= 0) {
+            try {
+                state.descriptor.close();
+            } catch (Exception ignored) {
+                // The replacement fd was already detached.
+            }
+        }
+    }
+
     static synchronized void sync(int fd, boolean close) {
         State state = OPEN.get(fd);
         if (state == null) {
             return;
         }
-        if (state.writable) {
-            try {
-                StructStat stat = Os.fstat(state.descriptor.getFileDescriptor());
-                long size = stat.st_size;
-                if (size > maxFileBytes) {
-                    throw new IllegalStateException("file too large");
-                }
-                byte[] data = new byte[(int) size];
-                if (size > 0) {
-                    int read = Os.pread(state.descriptor.getFileDescriptor(),
-                            data, 0, data.length, 0);
-                    if (read != data.length) {
-                        throw new IllegalStateException("short pread: " + read);
-                    }
-                }
-                ShieldChunkStore.writeAll(state.target, state.key, data);
-                Log.i(TAG, "sync fd=" + fd + " bytes=" + data.length);
-            } catch (Exception error) {
-                Log.w(TAG, "shadow sync failed: " + error);
-            }
+        if (!close) {
+            persist(fd, state);
+            return;
         }
-        if (close) {
-            OPEN.remove(fd);
-            try {
-                state.descriptor.detachFd();
-            } catch (Exception error) {
-                Log.w(TAG, "detach failed: " + error);
+        OPEN.remove(fd);
+        if (--state.refs > 0) {
+            return;
+        }
+        persist(fd, state);
+        try {
+            // The caller closes the exported fd separately; this is the
+            // private memfd descriptor used for sync.
+            state.descriptor.close();
+        } catch (Exception error) {
+            Log.w(TAG, "descriptor close failed: " + error);
+        }
+    }
+
+    private static void persist(int fd, State state) {
+        if (!state.writable) {
+            return;
+        }
+        try {
+            StructStat stat = Os.fstat(state.descriptor.getFileDescriptor());
+            long size = stat.st_size;
+            if (size > maxFileBytes) {
+                throw new IllegalStateException("file too large");
             }
+            byte[] data = new byte[(int) size];
+            if (size > 0) {
+                int read = Os.pread(state.descriptor.getFileDescriptor(),
+                        data, 0, data.length, 0);
+                if (read != data.length) {
+                    throw new IllegalStateException("short pread: " + read);
+                }
+            }
+            ShieldChunkStore.writeAll(state.target, state.key, data);
+            Log.i(TAG, "sync fd=" + fd + " bytes=" + data.length);
+        } catch (Exception error) {
+            Log.w(TAG, "shadow sync failed: " + error);
         }
     }
 
@@ -153,6 +202,7 @@ final class ShieldNativeIo {
         final boolean writable;
         final byte[] key;
         final ParcelFileDescriptor descriptor;
+        int refs = 1;
 
         State(File target, boolean writable, byte[] key, ParcelFileDescriptor descriptor) {
             this.target = target;

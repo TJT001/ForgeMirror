@@ -113,6 +113,11 @@ final class ShieldPolicy {
     }
 
     boolean encrypts(String relPath) {
+        return matches(rules, excludes, relPath);
+    }
+
+    static boolean matches(List<Pattern> rules, List<Pattern> excludes,
+                           String relPath) {
         for (Pattern exclude : excludes) {
             if (exclude.matcher(relPath).matches()) {
                 return false;

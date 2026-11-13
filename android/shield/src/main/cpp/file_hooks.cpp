@@ -42,6 +42,8 @@ jclass gIoClass = nullptr;
 jmethodID gIoOpen = nullptr;
 jmethodID gIoSync = nullptr;
 jmethodID gIoProtected = nullptr;
+jmethodID gIoRememberDup = nullptr;
+jmethodID gIoForgetDup = nullptr;
 __thread bool gInternal = false;
 std::mutex gShadowLock;
 std::unordered_set<int> gShadowFds;
@@ -67,6 +69,9 @@ using open2_t = int (*)(const char *, int);
 using openat2_t = int (*)(int, const char *, int);
 using openat2_how_t = int (*)(int, const char *, struct open_how *, size_t);
 using close_t = int (*)(int);
+using dup_t = int (*)(int);
+using dup2_t = int (*)(int, int);
+using dup3_t = int (*)(int, int, int);
 using rename_t = int (*)(const char *, const char *);
 using renameat_t = int (*)(int, const char *, int, const char *);
 using unlink_t = int (*)(const char *);
@@ -93,6 +98,9 @@ openat2_how_t g_openat2_how = nullptr;
 open_t g_open64 = nullptr;
 openat_t g_openat64 = nullptr;
 close_t g_close = nullptr;
+dup_t g_dup = nullptr;
+dup2_t g_dup2 = nullptr;
+dup3_t g_dup3 = nullptr;
 rename_t g_rename = nullptr;
 renameat_t g_renameat = nullptr;
 unlink_t g_unlink = nullptr;
@@ -253,6 +261,59 @@ bool java_is_protected(const char *path) {
         gVm->DetachCurrentThread();
     }
     return result;
+}
+
+void java_remember_dup(int oldFd, int newFd) {
+    if (gVm == nullptr || gIoClass == nullptr || gIoRememberDup == nullptr) {
+        return;
+    }
+    JNIEnv *env = nullptr;
+    bool attached = false;
+    jint status = gVm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if (gVm->AttachCurrentThread(&env, nullptr) != JNI_OK) {
+            return;
+        }
+        attached = true;
+    } else if (status != JNI_OK) {
+        return;
+    }
+    gInternal = true;
+    env->CallStaticVoidMethod(gIoClass, gIoRememberDup,
+                              static_cast<jint>(oldFd), static_cast<jint>(newFd));
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+    }
+    gInternal = false;
+    if (attached) {
+        gVm->DetachCurrentThread();
+    }
+}
+
+void java_forget_dup(int fd) {
+    if (gVm == nullptr || gIoClass == nullptr || gIoForgetDup == nullptr) {
+        return;
+    }
+    JNIEnv *env = nullptr;
+    bool attached = false;
+    jint status = gVm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if (gVm->AttachCurrentThread(&env, nullptr) != JNI_OK) {
+            return;
+        }
+        attached = true;
+    } else if (status != JNI_OK) {
+        return;
+    }
+    gInternal = true;
+    env->CallStaticVoidMethod(gIoClass, gIoForgetDup, static_cast<jint>(fd));
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+    }
+    gInternal = false;
+    if (attached) {
+        gVm->DetachCurrentThread();
+    }
 }
 
 void java_sync_shadow(int fd, bool close) {
@@ -831,6 +892,55 @@ ssize_t proxy_writev(int fd, const struct iovec *iov, int count) {
     return result;
 }
 
+int proxy_dup(int oldfd) {
+    SHADOWHOOK_STACK_SCOPE();
+    auto prev = (dup_t) shadowhook_get_prev_func((void *) &proxy_dup);
+    int result = prev != nullptr ? prev(oldfd) : -1;
+    if (result >= 0 && is_shadow(oldfd)) {
+        remember_shadow(result);
+        java_remember_dup(oldfd, result);
+    }
+    return result;
+}
+
+int proxy_dup2(int oldfd, int newfd) {
+    SHADOWHOOK_STACK_SCOPE();
+    bool oldShadow = is_shadow(oldfd);
+    bool newShadow = is_shadow(newfd);
+    auto prev = (dup2_t) shadowhook_get_prev_func((void *) &proxy_dup2);
+    int result = prev != nullptr ? prev(oldfd, newfd) : -1;
+    if (result >= 0) {
+        if (newShadow && !(oldShadow && oldfd == newfd)) {
+            forget_shadow(newfd);
+            java_forget_dup(newfd);
+        }
+        if (oldShadow && oldfd != newfd) {
+            remember_shadow(newfd);
+            java_remember_dup(oldfd, newfd);
+        }
+    }
+    return result;
+}
+
+int proxy_dup3(int oldfd, int newfd, int flags) {
+    SHADOWHOOK_STACK_SCOPE();
+    bool oldShadow = is_shadow(oldfd);
+    bool newShadow = is_shadow(newfd);
+    auto prev = (dup3_t) shadowhook_get_prev_func((void *) &proxy_dup3);
+    int result = prev != nullptr ? prev(oldfd, newfd, flags) : -1;
+    if (result >= 0) {
+        if (newShadow) {
+            forget_shadow(newfd);
+            java_forget_dup(newfd);
+        }
+        if (oldShadow) {
+            remember_shadow(newfd);
+            java_remember_dup(oldfd, newfd);
+        }
+    }
+    return result;
+}
+
 int proxy_close(int fd) {
     SHADOWHOOK_STACK_SCOPE();
     if (!gInternal && is_shadow(fd)) {
@@ -999,6 +1109,9 @@ void install() {
     hook("open64", reinterpret_cast<void *>(&proxy_open64), &g_open64);
     hook("openat64", reinterpret_cast<void *>(&proxy_openat64), &g_openat64);
     hook("close", reinterpret_cast<void *>(&proxy_close), &g_close);
+    hook("dup", reinterpret_cast<void *>(&proxy_dup), &g_dup);
+    hook("dup2", reinterpret_cast<void *>(&proxy_dup2), &g_dup2);
+    hook("dup3", reinterpret_cast<void *>(&proxy_dup3), &g_dup3);
     hook("rename", reinterpret_cast<void *>(&proxy_rename), &g_rename);
     hook("renameat", reinterpret_cast<void *>(&proxy_renameat), &g_renameat);
     hook("unlink", reinterpret_cast<void *>(&proxy_unlink), &g_unlink);
@@ -1067,8 +1180,12 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
         gIoSync = env->GetStaticMethodID(gIoClass, "sync", "(IZ)V");
         gIoProtected = env->GetStaticMethodID(
                 gIoClass, "protectedPath", "(Ljava/lang/String;)Z");
+        gIoRememberDup = env->GetStaticMethodID(
+                gIoClass, "rememberDup", "(II)V");
+        gIoForgetDup = env->GetStaticMethodID(gIoClass, "forgetDup", "(I)V");
         if (gIoOpen == nullptr || gIoSync == nullptr ||
-            gIoProtected == nullptr) {
+            gIoProtected == nullptr || gIoRememberDup == nullptr ||
+            gIoForgetDup == nullptr) {
             env->ExceptionClear();
         }
         env->DeleteLocalRef(type);

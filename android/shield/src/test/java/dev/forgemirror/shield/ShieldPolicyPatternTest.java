@@ -5,7 +5,30 @@ import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
+import java.util.Arrays;
+import java.util.List;
+
 public final class ShieldPolicyPatternTest {
+    private static List<java.util.regex.Pattern> patterns(String... values) {
+        java.util.List<java.util.regex.Pattern> result = new java.util.ArrayList<>();
+        for (String value : values) {
+            result.add(ShieldPolicy.compilePattern(value));
+        }
+        return result;
+    }
+
+    @Test
+    public void excludeWinsOverEncryptRule() {
+        List<java.util.regex.Pattern> rules = patterns(
+                "files/**/*.txt", "databases/*");
+        List<java.util.regex.Pattern> excludes = patterns(
+                "databases/*", "cache/**");
+        assertTrue(ShieldPolicy.matches(rules, excludes, "files/harness.txt"));
+        assertFalse(ShieldPolicy.matches(rules, excludes, "databases/harness.db"));
+        assertFalse(ShieldPolicy.matches(rules, excludes, "cache/entry"));
+        assertFalse(ShieldPolicy.matches(rules, excludes, "files/harness.dat"));
+    }
+
     @Test
     public void globstarMatchesZeroOrMoreSegments() {
         assertTrue(ShieldPolicy.compilePattern("files/**/*.txt")

@@ -2,6 +2,7 @@ package dev.forgemirror.demo;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.util.Log;
 
@@ -150,6 +151,16 @@ public final class HarnessStorage {
         boolean fileOk = fileText != null && fileText.startsWith("harness ");
         boolean appendOk = fileText != null && fileText.contains("appended");
 
+        boolean sqliteOk = false;
+        try (SQLiteDatabase database =
+                     context.openOrCreateDatabase("harness.db", Context.MODE_PRIVATE, null);
+             Cursor cursor = database.rawQuery(
+                     "SELECT COUNT(*) FROM events", null)) {
+            sqliteOk = cursor.moveToFirst() && cursor.getInt(0) > 0;
+        } catch (Exception error) {
+            Log.w(TAG, "sqlite readback failed", error);
+        }
+
         boolean randomOk = false;
         boolean mmapOk = false;
         try (dev.forgemirror.shield.ShieldRandomAccess random =
@@ -185,6 +196,6 @@ public final class HarnessStorage {
 
         return "readback prefs=" + prefsOk + " counter=" + counter
                 + " file=" + fileOk + " append=" + appendOk + " ra=" + randomOk
-                + " mmap=" + mmapOk;
+                + " mmap=" + mmapOk + " sqlite=" + sqliteOk;
     }
 }

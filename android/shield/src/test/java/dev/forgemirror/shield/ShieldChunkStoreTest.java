@@ -14,6 +14,8 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.Arrays;
 
 public final class ShieldChunkStoreTest {
@@ -190,6 +192,74 @@ public final class ShieldChunkStoreTest {
         } catch (IOException expected) {
             // Rejected.
         }
+    }
+
+    @Test
+    public void truncatedFileIsRejected() throws Exception {
+        File file = file();
+        try (ShieldChunkStore store = ShieldChunkStore.open(file, KEY, "rw")) {
+            writeBlocks(store, pattern(1000, 4));
+        }
+        try (RandomAccessFile raw = new RandomAccessFile(file, "rw")) {
+            raw.setLength(file.length() - 10);
+        }
+        try {
+            ShieldChunkStore.open(file, KEY, "r").close();
+            fail("truncated FMF2 accepted");
+        } catch (IOException expected) {
+            // Rejected.
+        }
+    }
+
+    @Test
+    public void staleTempFromCrashIsDiscarded() throws Exception {
+        File file = new File(folder.getRoot(), "crash.bin");
+        byte[] data = pattern(5000, 8);
+        try (ShieldChunkStore store = ShieldChunkStore.open(file, KEY, "rw")) {
+            writeBlocks(store, data);
+        }
+        File temp = new File(file.getParentFile(), file.getName() + ".fmf2.tmp");
+        try (FileOutputStream out = new FileOutputStream(temp)) {
+            out.write(pattern(123, 77));
+        }
+        assertTrue(temp.isFile());
+        assertArrayEquals(data, readAll(file));
+        assertFalse(temp.isFile());
+        try (ShieldChunkStore store = ShieldChunkStore.open(file, KEY, "rw")) {
+            byte[] patch = pattern(32, 55);
+            store.write(0, patch, 0, patch.length);
+        }
+        assertTrue(ShieldChunkStore.matches(file));
+    }
+
+    @Test
+    public void secondWritableOpenIsRejectedThenReopens() throws Exception {
+        File file = new File(folder.getRoot(), "locked.bin");
+        byte[] data = pattern(1000, 6);
+        ShieldChunkStore first = ShieldChunkStore.open(file, KEY, "rw");
+        writeBlocks(first, data);
+        try {
+            ShieldChunkStore second = ShieldChunkStore.open(file, KEY, "rw");
+            second.close();
+            fail("concurrent writable open accepted");
+        } catch (IOException expected) {
+            // Rejected by the per-file lock.
+        }
+        first.close();
+        assertArrayEquals(data, readAll(file));
+    }
+
+    @Test
+    public void renamedFileKeepsContent() throws Exception {
+        File file = new File(folder.getRoot(), "before.bin");
+        File renamed = new File(folder.getRoot(), "after.bin");
+        byte[] data = pattern(9000, 9);
+        try (ShieldChunkStore store = ShieldChunkStore.open(file, KEY, "rw")) {
+            writeBlocks(store, data);
+        }
+        Files.move(file.toPath(), renamed.toPath(),
+                StandardCopyOption.ATOMIC_MOVE);
+        assertArrayEquals(data, readAll(renamed));
     }
 
     @Test

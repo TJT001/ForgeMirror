@@ -56,6 +56,7 @@ public final class ShieldRuntime {
     }
 
     public static synchronized int bootstrap(Context context) {
+        ShieldMetrics.start();
         if (context == null) {
             fail("bootstrap without context");
             return state;
@@ -162,7 +163,9 @@ public final class ShieldRuntime {
             state = STATE_DEX_READY;
             state = STATE_APP_ATTACHED;
             startRuleScan(context);
-            Log.i(TAG, "bootstrap ok state=" + state);
+            ShieldMetrics.bootstrapDone();
+            Log.i(TAG, "bootstrap ok state=" + state + " "
+                    + ShieldMetrics.describe());
             return state;
         } catch (Throwable error) {
             fail("bootstrap failed: " + error);
@@ -235,6 +238,7 @@ public final class ShieldRuntime {
     }
 
     static void adaptActivity(Activity activity) {
+        ShieldMetrics.watchFirstFrame(activity);
         ClassLoader memory = memoryLoader;
         if (activity == null || memory == null) {
             return;

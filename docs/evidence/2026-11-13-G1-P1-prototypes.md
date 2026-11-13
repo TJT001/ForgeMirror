@@ -1,0 +1,74 @@
+# 2026-11-13 G1：P1 原型汇总（阶段状态）
+
+## 四份原型报告
+
+| 原型 | 报告 | 状态 |
+|---|---|---|
+| P1-A 构建侧 S0–S2 | `2026-11-12-P1A.md`、`2026-11-13-P1-self-decrypt-core.md`、`2026-11-13-P1-dt-init-lzss.md` | 完成 |
+| P1-B 透明接管与恢复 | `2026-11-12-P1B.md`、`2026-11-13-P1-third-party-v2rayng.md` | 完成 |
+| P1-C 完整 DEX 加载 | `2026-11-12-P1C.md`、`2026-11-13-P1C-plus.md`、`2026-11-13-P1C-plus-round2.md` | 完成（C1–C5） |
+| P1-D 透明文件保护 | `2026-11-13-P1-transparent-io.md`、`2026-11-13-P1-D3-D5-C4-C5.md` | 完成（D1–D5） |
+
+补充：`2026-11-13-P1-double-dynamic.md`、`2026-11-13-P1-self-decrypt-core.md`、
+`2026-11-13-P1-dt-init-lzss.md` 记录参考壳路线的静态对抗增强。
+
+## P1 检查表
+
+| ID | 状态 | 说明 |
+|---|---|---|
+| P1-A1–A6 | done | S0/S1/S2、容器自测、CLI、负例测试 |
+| P1-B1–B6 | done | Provider/Factory/Application、幂等状态、Bootstrapper/Core、恢复页、S6 注入 |
+| P1-C1–C3 | done | 内存 DEX、多 DEX 顺序、跨 DEX/反射/JNI/组件设备验证 |
+| P1-C4 | done | `ShieldArt.Adapter` + `art-26-28` / `art-29+` 空适配器、运行时探测、单测 |
+| P1-C5 | done（基线受限） | `bootstrapMs/firstFrameMs/decryptMs/pssKb`；见下文基线 |
+| P1-D1–D2 | done | 策略通配/排除、SharedPreferences 适配 |
+| P1-D3 | done | open/read/write/pread/pwrite/lseek/close + dup/dup2/dup3；mmap/msync |
+| P1-D4 | done | 每文件 AEAD、逻辑偏移、原子迁移、排除直通 |
+| P1-D5 | done（原型级） | 截断、残留 tmp、并发锁、重命名、排除 SQLite；无事务日志 |
+| P1-E | done | API/worker/PostgreSQL/Vue/开发授权 |
+
+## 设备矩阵
+
+| 设备/环境 | API/ABI | 结果 | 证据 |
+|---|---|---|---|
+| Pixel 5 | 30 / arm64-v8a | 通过 | demo 探针、v2rayNG 2.4.0、DT_INIT LZSS、诱饵、透明 I/O |
+| Android 构建 | x86 / x86_64 | 仅编译通过 | ShadowHook/x86 原生 hook 未运行验证 |
+| Android 构建 | armeabi-v7a | 仅编译通过 | ARM32 内联 cacheflush 已编译，未真机验证 |
+| API 26–28 | — | 未验证 | `ShieldInstrumentation` 路径未经真机 |
+| API 31+ / 35–37 | — | 未验证 | targetSdk 37 包可在 API 30 运行，反向未覆盖 |
+
+结论：**G1 设备矩阵只完成 1 台真机 + 第三方应用样本，未达到多 ROM/多 API 覆盖。**
+
+## 启动基线（Pixel 5 / API 30）
+
+v2rayNG 2.4.0 冷启动：
+
+```text
+dex loaded count=5 decryptMs=749 pssKb=131310
+bootstrapMs=985
+firstFrameMs=2739
+am start -W TotalTime=2915ms
+```
+
+Demo harness 的 `firstFrameMs` 包含 3 秒探针 sleep，不计入基线。
+
+## 遗留项清单
+
+| 类别 | 遗留 | 影响 |
+|---|---|---|
+| 崩溃恢复 | 无事务日志/WAL；`persist` 为临时文件 + 原子替换，最多丢约 2 秒周期回写 | 强一致写入场景需补 journal |
+| 并发 | 跨进程各自 memfd 快照，最后关闭者覆盖；无合并 | 多进程同文件并发写不安全 |
+| 锁语义 | `flock/fcntl` 作用在 memfd，不与真实文件锁互通 | 依赖文件锁的 native 代码需适配 |
+| 系统调用 | 内联 `svc`、`io_uring` 未覆盖；`openat2.resolve` 未模拟 | 直接 syscall 可绕过透明 I/O |
+| ABI | x86/x86_64 无 ShadowHook 原生 hook；ARM32 未真机验证 | x86 透明 I/O/block 不可用 |
+| 加载器 | 未实现内存 ELF loader / safejni；core 用 FD + `android_dlopen_ext` | `/proc/self/fd` 可见 memfd |
+| ART | 适配器为空实现，`VerifyClass` 未启用 | 当前无失败证据，符合 C4 约束 |
+| 构建 | 未处理 split APK/AAB、增量升级、16 KB page 对齐矩阵 | 需 P2/P4 扩展 |
+| 设备 | API 26–28、31+、国产 ROM 未覆盖 | G1 矩阵不足 |
+
+## 下一步建议
+
+1. 建立 API 26/28/31/33/35 真机或云设备矩阵，优先验证 `ShieldInstrumentation` 与 ART 适配；
+2. 为透明文件补事务 journal 与跨进程合并，再宣称崩溃一致性；
+3. 评估 x86 原生 hook 后端（ShadowHook 不支持则明确 unsupported）；
+4. 补内联 `svc`/`io_uring` 覆盖或明确记录为未覆盖路径。
