@@ -46,6 +46,18 @@ public final class ShieldDetectTest {
     }
 
     @Test
+    public void shellMappingPathClassification() {
+        String source = "/data/app/~~x/dev.forgemirror.demo-y/base.apk";
+        String nativeDir = "/data/app/~~x/dev.forgemirror.demo-y/lib/arm64";
+        org.junit.Assert.assertTrue(ShieldSelfCheck.isTrustedPath(
+                source + "!/lib/arm64-v8a/libshield_hook.so", source, nativeDir));
+        org.junit.Assert.assertTrue(ShieldSelfCheck.isTrustedPath(
+                nativeDir + "/libshadowhook.so", source, nativeDir));
+        org.junit.Assert.assertFalse(ShieldSelfCheck.isTrustedPath(
+                "/data/local/tmp/libshield_hook.so", source, nativeDir));
+    }
+
+    @Test
     public void threadClassification() {
         assertEquals("env_frida", ShieldDetect.classifyThread("gum-js-loop"));
         assertEquals("env_frida", ShieldDetect.classifyThread("pool-frida"));

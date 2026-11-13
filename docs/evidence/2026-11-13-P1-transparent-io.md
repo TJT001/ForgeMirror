@@ -146,3 +146,20 @@ Python pipeline 61 项
 Shield JVM      17 项
 Go build/vet    通过
 ```
+
+### 自检与反静态（本轮）
+
+- 检测 token（frida/xposed/injection/unpacker/hook/thread/build）改为 XOR+hex 编码的
+  `ShieldStrings` 风格常量，静态 DEX 中不再直接出现明文特征串；单元测试仍覆盖分类逻辑。
+- `ShieldFileWatch` 增加 `files/` 父目录观察：`shield/` 目录被删除/移动时上报。
+- `ShieldSelfCheck`：启动后检查 `/proc/self/maps` 是否映射 `base.apk`，以及可见的
+  `libshield*`/`libshadowhook*` 映射是否来自 `sourceDir`/`nativeLibraryDir`；
+  APK 内嵌 lib 在 maps 中通常只显示 `base.apk`，因此 `shellLibs=0` 计为可接受，
+  发现 `(deleted)` 或非受信路径才上报 `file_tamper/self_check`。
+- 设备：`ShieldSelfCheck: self check ok shellLibs=0`，无误报。
+
+```text
+ShieldSelfCheck: self check ok shellLibs=0
+ShieldDetect: no runtime findings
+ShieldDetectionBridge: registered
+```

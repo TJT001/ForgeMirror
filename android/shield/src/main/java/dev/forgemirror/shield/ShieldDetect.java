@@ -27,6 +27,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 final class ShieldDetect {
     private static final String TAG = "ShieldDetect";
     private static final long MAX_MAPS_BYTES = 8L << 20;
+    private static final String[] FRIDA = decode("3c05fdd5afe16f502f7216eabcb582644e2649e6ffdfbf9066252a1befc7a1f09b70513f1a81c4ac8c95795a221ce2");
+    private static final String[] XPOSED = decode("2207fbc2ab8f0249312f13ead3b7fa684e3f14eeeddebcff764a3419e9d0a5b9");
+    private static final String[] INJECTION = decode("200ef3d8bd8002572b2d0993dbb29764592c6ef2ebd9ab81604e380c8cc2a4bf931d50350781dca48b9c74505c01ffc2be8f6d455b");
+    private static final String[] UNPACKER = decode("2318e1c1a5e16e50323476ffd7a184074e3209f1fadea0ff6b4e3e0fe7cbafb2911d502403fbc9b79692794d3e1cf4a7ae9269515a3e00f3dba3896b5f221209f7d2a099614f");
+    private static final String[] HOOK = decode("361ef6d9a184632f2b3110f0d8b69862452c6ee3f6d4b79e184b230be4dacaae9276503e19e3c7aa89");
+    private static final String[] THREAD = decode("3d02f99ca49825492d300c93d1be9164444d14eef1d7f59360462808");
+    private static final String[] BUILD = decode("3d12fad4bc826b2f273209f5d7a79f7f203400eac1dca89d7d412963e1ccafba96726b220ae0a2b3809064333116fed4a7887048513572f2dda3886f4f300877e8d6ba92665e");
     private static final AtomicBoolean STARTED = new AtomicBoolean();
     private static final AtomicBoolean DEBUGGER_REPORTED = new AtomicBoolean();
 
@@ -116,22 +123,19 @@ final class ShieldDetect {
                 || lower.contains("forgemirror")) {
             return null;
         }
-        if (containsAny(lower, "frida", "gum-js", "frida-gadget", "linjector")) {
+        if (containsAny(lower, FRIDA)) {
             return "env_frida";
         }
-        if (containsAny(lower, "xposed", "lsposed", "edxposed", "dexposed")) {
+        if (containsAny(lower, XPOSED)) {
             return "env_xposed";
         }
-        if (containsAny(lower, "zygisk", "riru", "magisk", "substrate",
-                "adbi", "ddi", "taichi", "roothide")) {
+        if (containsAny(lower, INJECTION)) {
             return "env_injection";
         }
-        if (containsAny(lower, "youpk", "fupk", "fart", "dumpdex", "yarfahook",
-                "dumpartmethod", "dumpdexfilebyartmethod")) {
+        if (containsAny(lower, UNPACKER)) {
             return "env_unpacker";
         }
-        if (containsAny(lower, "libhook", "inlinehook", "bhook", "dobby",
-                "shadowhook") && !lower.contains("libc++")) {
+        if (containsAny(lower, HOOK) && !lower.contains("libc++")) {
             return "env_hook";
         }
         return null;
@@ -175,7 +179,7 @@ final class ShieldDetect {
             return null;
         }
         String lower = name.toLowerCase(Locale.US);
-        if (containsAny(lower, "gum-js-loop", "gmain", "pool-frida")) {
+        if (containsAny(lower, THREAD)) {
             return "env_frida";
         }
         return null;
@@ -187,8 +191,7 @@ final class ShieldDetect {
                 + safe(model).toLowerCase(Locale.US) + "|"
                 + safe(hardware).toLowerCase(Locale.US) + "|"
                 + safe(product).toLowerCase(Locale.US);
-        if (containsAny(combined, "generic", "emulator", "sdk_gphone", "google_sdk",
-                "vbox", "genymotion", "goldfish", "ranchu")) {
+        if (containsAny(combined, BUILD)) {
             return "env_emulator";
         }
         return null;
@@ -494,6 +497,18 @@ final class ShieldDetect {
 
     private static String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    static String[] decode(String encoded) {
+        if (encoded == null || encoded.isEmpty()) {
+            return new String[0];
+        }
+        byte[] data = new byte[encoded.length() / 2];
+        for (int index = 0; index < data.length; index++) {
+            int value = Integer.parseInt(encoded.substring(index * 2, index * 2 + 2), 16);
+            data[index] = (byte) (value ^ ((0x5A + index * 0x1D) & 0xff));
+        }
+        return new String(data, StandardCharsets.UTF_8).split("\n");
     }
 
     static String hash(String value) {

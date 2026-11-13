@@ -23,6 +23,7 @@ final class ShieldFileWatch {
     private static final String TAG = "ShieldFileWatch";
     private static final AtomicBoolean STARTED = new AtomicBoolean();
     private static FileObserver observer;
+    private static FileObserver parentObserver;
 
     private ShieldFileWatch() {
     }
@@ -46,6 +47,20 @@ final class ShieldFileWatch {
             }
         };
         observer.startWatching();
+        File filesDir = context.getFilesDir();
+        if (filesDir != null && filesDir.isDirectory()) {
+            parentObserver = new FileObserver(filesDir.getAbsolutePath(),
+                    FileObserver.DELETE | FileObserver.MOVED_FROM
+                            | FileObserver.DELETE_SELF | FileObserver.MOVE_SELF) {
+                @Override
+                public void onEvent(int event, String path) {
+                    if ("shield".equals(path)) {
+                        handle(context, config, event, "shield");
+                    }
+                }
+            };
+            parentObserver.startWatching();
+        }
         Log.i(TAG, "watching " + dir);
     }
 

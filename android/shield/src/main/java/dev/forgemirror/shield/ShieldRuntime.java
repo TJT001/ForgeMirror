@@ -106,6 +106,7 @@ public final class ShieldRuntime {
                 ShieldDetect.start(context, config);
                 ShieldRuleUpdater.start(context, config, key);
                 ShieldFileWatch.start(context, config);
+                ShieldSelfCheck.start(context, config);
                 byte[] container = ShieldAssets.read(context, config.container);
                 byte[][] dex = ShieldContainer.open(container, key);
                 ByteBuffer[] buffers = new ByteBuffer[dex.length];
