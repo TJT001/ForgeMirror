@@ -81,6 +81,8 @@ public final class ShieldApplication extends Application {
      * and getApplicationContext() by swapping ActivityThread.mInitialApplication
      * and LoadedApk.mApplication after handleBindApplication installed this
      * wrapper as both. Business code casting getApplication() then succeeds.
+     * The shared ContextImpl keeps its identity (receivers cast it to
+     * ContextImpl); its mClassLoader is patched instead of wrapping it.
      */
     private void installOriginalApplication() {
         try {
@@ -94,15 +96,18 @@ public final class ShieldApplication extends Application {
             initialField.setAccessible(true);
             initialField.set(thread, original);
 
-            Object base = getBaseContext();
+            Object rawBase = original.getBaseContext();
             java.lang.reflect.Field packageInfoField =
-                    base.getClass().getDeclaredField("mPackageInfo");
+                    rawBase.getClass().getDeclaredField("mPackageInfo");
             packageInfoField.setAccessible(true);
-            Object loadedApk = packageInfoField.get(base);
+            Object loadedApk = packageInfoField.get(rawBase);
             java.lang.reflect.Field appField = loadedApk.getClass()
                     .getDeclaredField("mApplication");
             appField.setAccessible(true);
             appField.set(loadedApk, original);
+
+            ShieldContextAdapter.adaptClassLoader((Context) rawBase,
+                    ShieldRuntime.getClassLoader());
 
             // After the swap the framework dispatches lifecycle callbacks to the
             // original application only; register the adapter there as well.
@@ -111,6 +116,23 @@ public final class ShieldApplication extends Application {
         } catch (Throwable error) {
             Log.w(TAG, "original Application swap failed; getApplication() stays shield", error);
         }
+    }
+
+    @Override
+    public android.content.SharedPreferences getSharedPreferences(String name, int mode) {
+        return ShieldContextAdapter.sharedPreferences(getBaseContext(), name, mode);
+    }
+
+    @Override
+    public java.io.FileOutputStream openFileOutput(String name, int mode)
+            throws java.io.FileNotFoundException {
+        return ShieldContextAdapter.openFileOutput(getBaseContext(), name, mode);
+    }
+
+    @Override
+    public java.io.FileInputStream openFileInput(String name)
+            throws java.io.FileNotFoundException {
+        return ShieldContextAdapter.openFileInput(getBaseContext(), name);
     }
 
     private void startRecovery() {

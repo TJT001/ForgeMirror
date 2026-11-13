@@ -3,12 +3,16 @@ package dev.forgemirror.shield;
 import android.app.Activity;
 import android.content.Context;
 import android.content.ContextWrapper;
+import android.content.SharedPreferences;
 import android.os.Debug;
 import android.os.SystemClock;
 import android.util.Log;
 
+import java.io.File;
 import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Shield runtime: verify the signed manifest, decrypt the FDX2 container into
@@ -34,6 +38,9 @@ public final class ShieldRuntime {
     private static volatile byte[][] dexBuffers;
     private static volatile int dexCount;
     private static volatile long decryptMs;
+    private static volatile ShieldPolicy policy;
+    private static volatile byte[] fileKey;
+    private static final Map<String, ShieldSharedPreferences> PREFS = new HashMap<>();
 
     static {
         System.loadLibrary("shield_boot");
@@ -66,6 +73,13 @@ public final class ShieldRuntime {
             if (config.key != null && !config.key.isEmpty()) {
                 long started = SystemClock.elapsedRealtimeNanos();
                 byte[] key = ShieldAssets.read(context, config.key);
+                try {
+                    policy = ShieldPolicy.load(context, config, key);
+                } catch (Exception error) {
+                    fail("policy load failed: " + error);
+                    return state;
+                }
+                fileKey = ShieldPolicy.deriveFileKey(key, config.buildId);
                 byte[] container = ShieldAssets.read(context, config.container);
                 byte[][] dex = ShieldContainer.open(container, key);
                 ByteBuffer[] buffers = new ByteBuffer[dex.length];
@@ -140,6 +154,28 @@ public final class ShieldRuntime {
         return decryptMs;
     }
 
+    static boolean protects(String relPath) {
+        ShieldPolicy active = policy;
+        return active != null && active.encrypts(relPath);
+    }
+
+    static byte[] fileKey() {
+        return fileKey;
+    }
+
+    static SharedPreferences sharedPreferences(String name, Context base) {
+        synchronized (PREFS) {
+            ShieldSharedPreferences prefs = PREFS.get(name);
+            if (prefs == null) {
+                prefs = new ShieldSharedPreferences(
+                        new File(base.getDataDir(), "shared_prefs/" + name + ".xml"),
+                        fileKey);
+                PREFS.put(name, prefs);
+            }
+            return prefs;
+        }
+    }
+
     private static long pssKb() {
         try {
             return Debug.getPss();
@@ -155,13 +191,10 @@ public final class ShieldRuntime {
         }
         try {
             Context base = activity.getBaseContext();
-            if (base == null || base instanceof ShieldContextWrapper) {
+            if (base == null) {
                 return;
             }
-            ShieldContextWrapper wrapper = new ShieldContextWrapper(base, memory);
-            Field baseField = ContextWrapper.class.getDeclaredField("mBase");
-            baseField.setAccessible(true);
-            baseField.set(activity, wrapper);
+            ShieldContextAdapter.adaptClassLoader(base, memory);
             Log.i(TAG, "activity context adapted: " + activity.getClass().getName());
         } catch (Throwable error) {
             Log.w(TAG, "activity context adaptation failed", error);

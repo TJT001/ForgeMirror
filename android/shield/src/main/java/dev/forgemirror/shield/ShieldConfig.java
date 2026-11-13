@@ -12,6 +12,8 @@ final class ShieldConfig {
     final String manifest;
     final String trustedKey;
     final String key;
+    final String policy;
+    final String buildId;
 
     private ShieldConfig(
             String originalApplication,
@@ -20,7 +22,9 @@ final class ShieldConfig {
             String container,
             String manifest,
             String trustedKey,
-            String key) {
+            String key,
+            String policy,
+            String buildId) {
         this.originalApplication = originalApplication;
         this.originalFactory = originalFactory;
         this.shellVersion = shellVersion;
@@ -28,6 +32,8 @@ final class ShieldConfig {
         this.manifest = manifest;
         this.trustedKey = trustedKey;
         this.key = key;
+        this.policy = policy;
+        this.buildId = buildId;
     }
 
     static ShieldConfig load(Context context) throws Exception {
@@ -39,6 +45,8 @@ final class ShieldConfig {
                 json.optString("container", "container.fdx"),
                 json.optString("manifest", "shield/manifest.sig"),
                 json.optString("trusted_key", "shield/trusted_key.der"),
-                json.optString("key", ""));
+                json.optString("key", ""),
+                json.optString("policy", ""),
+                json.optString("build_id", ""));
     }
 }

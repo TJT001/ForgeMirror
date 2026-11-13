@@ -50,7 +50,8 @@ public class MainActivity extends AppCompatActivity {
         }
 
         TextView tv = binding.sampleText;
-        tv.setText(stringFromJNI() + "\n" + appStatus + "\n" + providerStatus);
+        tv.setText(stringFromJNI() + "\n" + appStatus + "\n" + providerStatus
+                + "\n" + HarnessStorage.verify(this));
     }
 
     @Override

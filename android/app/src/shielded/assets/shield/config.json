@@ -6,5 +6,7 @@
   "container": "container.fdx",
   "manifest": "shield/manifest.sig",
   "trusted_key": "shield/trusted_key.der",
-  "key": ""
+  "key": "",
+  "policy": "shield/policy.pkg",
+  "build_id": ""
 }

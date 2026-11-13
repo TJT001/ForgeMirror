@@ -6,6 +6,7 @@ import android.database.sqlite.SQLiteDatabase;
 import android.util.Log;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -17,18 +18,38 @@ public final class HarnessStorage {
     }
 
     public static void exercise(Context context) {
-        SharedPreferences prefs = context.getSharedPreferences("harness_prefs", Context.MODE_PRIVATE);
-        prefs.edit().putString("last_write", Long.toString(System.currentTimeMillis())).apply();
+        // P1-D call-site adaptation: business code calls the shield facade,
+        // which the build step rewrites from context.getSharedPreferences /
+        // context.openFileOutput call sites (design doc 16.4).
+        SharedPreferences prefs =
+                ShieldStorageFacade.getSharedPreferences(context, "harness_prefs");
+        int counter = prefs.getInt("counter", 0);
+        prefs.edit()
+                .putString("last_write", Long.toString(System.currentTimeMillis()))
+                .putInt("counter", counter + 1)
+                .commit();
+        Log.i(TAG, "prefs counter=" + (counter + 1));
 
-        File file = new File(context.getFilesDir(), "harness.txt");
-        try (FileOutputStream out = new FileOutputStream(file)) {
+        try (FileOutputStream out =
+                     ShieldStorageFacade.openFileOutput(context, "harness.txt")) {
             out.write(("harness " + System.currentTimeMillis() + "\n")
                     .getBytes(StandardCharsets.UTF_8));
         } catch (IOException error) {
-            Log.e(TAG, "file write failed", error);
+            Log.e(TAG, "covered file write failed", error);
         }
 
-        SQLiteDatabase database = context.openOrCreateDatabase("harness.db", Context.MODE_PRIVATE, null);
+        // Direct stream, no context openFileOutput call site: demonstrates the
+        // interception boundary — this file stays plaintext by design in P1-D.
+        File plain = new File(context.getFilesDir(), "harness_plain.txt");
+        try (FileOutputStream out = new FileOutputStream(plain)) {
+            out.write(("plain " + System.currentTimeMillis() + "\n")
+                    .getBytes(StandardCharsets.UTF_8));
+        } catch (IOException error) {
+            Log.e(TAG, "plain file write failed", error);
+        }
+
+        SQLiteDatabase database =
+                context.openOrCreateDatabase("harness.db", Context.MODE_PRIVATE, null);
         try {
             database.execSQL(
                     "CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, value TEXT NOT NULL)");
@@ -36,5 +57,30 @@ public final class HarnessStorage {
         } finally {
             database.close();
         }
+    }
+
+    public static String verify(Context context) {
+        SharedPreferences prefs =
+                ShieldStorageFacade.getSharedPreferences(context, "harness_prefs");
+        String lastWrite = prefs.getString("last_write", null);
+        int counter = prefs.getInt("counter", 0);
+
+        String fileText = null;
+        try (FileInputStream in = ShieldStorageFacade.openFileInput(context, "harness.txt")) {
+            StringBuilder text = new StringBuilder();
+            byte[] chunk = new byte[512];
+            int read;
+            while ((read = in.read(chunk)) != -1) {
+                text.append(new String(chunk, 0, read, StandardCharsets.UTF_8));
+            }
+            fileText = text.toString().trim();
+        } catch (IOException error) {
+            Log.e(TAG, "covered file read failed", error);
+        }
+
+        boolean prefsOk = lastWrite != null && counter > 0;
+        boolean fileOk = fileText != null && fileText.startsWith("harness ");
+        return "readback prefs=" + prefsOk + " counter=" + counter
+                + " file=" + fileOk;
     }
 }

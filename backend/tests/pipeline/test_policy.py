@@ -7,6 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pipeline"))
 
+from cryptography.hazmat.primitives.asymmetric import ec  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: E402
 
 from forgemirror.formats.policy import (  # noqa: E402
@@ -87,6 +88,30 @@ class PolicyTests(unittest.TestCase):
                 k_content=K_CONTENT,
                 build_id=BUILD_ID,
                 private_key=self.private_key,
+            )
+
+    def test_ecdsa_raw_roundtrip(self) -> None:
+        key = ec.generate_private_key(ec.SECP256R1())
+        blob = pack_policy(
+            POLICY,
+            k_content=K_CONTENT,
+            build_id=BUILD_ID,
+            private_key=key,
+            alg="ecdsa-p256-sha256-raw",
+        )
+        opened = open_policy(
+            blob,
+            k_content=K_CONTENT,
+            build_id=BUILD_ID,
+            public_key=key.public_key(),
+        )
+        self.assertEqual(opened, POLICY)
+        with self.assertRaises(PolicyError):
+            open_policy(
+                blob,
+                k_content=K_CONTENT,
+                build_id=BUILD_ID,
+                public_key=ec.generate_private_key(ec.SECP256R1()).public_key(),
             )
 
 

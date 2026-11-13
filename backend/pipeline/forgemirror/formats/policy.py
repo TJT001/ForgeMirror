@@ -9,9 +9,17 @@ from typing import Any
 
 from cryptography.exceptions import InvalidSignature, InvalidTag
 from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric.ec import (
+    EllipticCurvePrivateKey,
+    EllipticCurvePublicKey,
+)
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
+)
+from cryptography.hazmat.primitives.asymmetric.utils import (
+    decode_dss_signature,
+    encode_dss_signature,
 )
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -19,6 +27,8 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 MAGIC = b"SPK1"
 VERSION = 1
 CIPHER_AES_256_GCM = 1
+SIG_ED25519 = 1
+SIG_ECDSA_P256_RAW = 2
 TAG_SIZE = 16
 SIGNATURE_SIZE = 64
 MAX_PLAINTEXT = 1 << 20
@@ -31,6 +41,42 @@ assert _HEADER.size == 24
 
 class PolicyError(Exception):
     """Raised when a policy package is malformed or fails authentication."""
+
+
+def _sign(private_key: Any, algorithm: str, data: bytes) -> bytes:
+    if algorithm == "ed25519":
+        return private_key.sign(data)
+    if algorithm == "ecdsa-p256-sha256-raw":
+        if not isinstance(private_key, EllipticCurvePrivateKey):
+            raise ValueError("ecdsa-p256-sha256-raw requires an EC private key")
+        der = private_key.sign(data, ec_sig_hash())
+        r, s = decode_dss_signature(der)
+        return r.to_bytes(32, "big") + s.to_bytes(32, "big")
+    raise ValueError(f"unsupported signature algorithm: {algorithm}")
+
+
+def _verify(public_key: Any, algorithm: int, signature: bytes, data: bytes) -> None:
+    if len(signature) != SIGNATURE_SIZE:
+        raise PolicyError("policy signature length invalid")
+    if algorithm == SIG_ED25519:
+        if not isinstance(public_key, Ed25519PublicKey):
+            raise PolicyError("signature algorithm does not match key type")
+        public_key.verify(signature, data)
+        return
+    if algorithm == SIG_ECDSA_P256_RAW:
+        if not isinstance(public_key, EllipticCurvePublicKey):
+            raise PolicyError("signature algorithm does not match key type")
+        r = int.from_bytes(signature[:32], "big")
+        s = int.from_bytes(signature[32:], "big")
+        public_key.verify(encode_dss_signature(r, s), data, ec_sig_hash())
+        return
+    raise PolicyError(f"unsupported signature algorithm id: {algorithm}")
+
+
+def ec_sig_hash():
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    return ec.ECDSA(hashes.SHA256())
 
 
 def _derive(k_content: bytes, build_id: bytes) -> bytes:
@@ -68,7 +114,8 @@ def pack_policy(
     *,
     k_content: bytes,
     build_id: bytes,
-    private_key: Ed25519PrivateKey,
+    private_key: Any,
+    alg: str = "ed25519",
 ) -> bytes:
     _validate(policy)
     plaintext = json.dumps(
@@ -77,11 +124,14 @@ def pack_policy(
     if len(plaintext) > MAX_PLAINTEXT:
         raise ValueError("policy plaintext too large")
 
+    sig_alg = SIG_ED25519 if alg == "ed25519" else SIG_ECDSA_P256_RAW
     nonce = os.urandom(12)
-    header = _HEADER.pack(MAGIC, VERSION, CIPHER_AES_256_GCM, 0, nonce, len(plaintext))
+    header = _HEADER.pack(
+        MAGIC, VERSION, CIPHER_AES_256_GCM, sig_alg, nonce, len(plaintext)
+    )
     key = _derive(k_content, build_id)
     ciphertext = AESGCM(key).encrypt(nonce, plaintext, header)
-    signature = private_key.sign(header + ciphertext)
+    signature = _sign(private_key, alg, header + ciphertext)
     return header + ciphertext + signature
 
 
@@ -90,14 +140,14 @@ def open_policy(
     *,
     k_content: bytes,
     build_id: bytes,
-    public_key: Ed25519PublicKey,
+    public_key: Any,
 ) -> dict[str, Any]:
     minimum = _HEADER.size + TAG_SIZE + SIGNATURE_SIZE
     if len(blob) < minimum:
         raise PolicyError("policy package too short")
 
-    magic, version, cipher, reserved, nonce, plaintext_len = _HEADER.unpack_from(blob, 0)
-    if magic != MAGIC or version != VERSION or cipher != CIPHER_AES_256_GCM or reserved != 0:
+    magic, version, cipher, sig_alg, nonce, plaintext_len = _HEADER.unpack_from(blob, 0)
+    if magic != MAGIC or version != VERSION or cipher != CIPHER_AES_256_GCM:
         raise PolicyError("bad policy header")
     if plaintext_len > MAX_PLAINTEXT:
         raise PolicyError("policy plaintext too large")
@@ -107,7 +157,7 @@ def open_policy(
     body = blob[:-SIGNATURE_SIZE]
     signature = blob[-SIGNATURE_SIZE:]
     try:
-        public_key.verify(signature, body)
+        _verify(public_key, sig_alg, signature, body)
     except InvalidSignature as exc:
         raise PolicyError("policy signature invalid") from exc
 

@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT / "backend" / "pipeline"))
 
 from forgemirror.apk import parse_badging  # noqa: E402
 from forgemirror.formats.container import FileSpec, open_container, write_container  # noqa: E402
+from forgemirror.formats.policy import pack_policy  # noqa: E402
 from forgemirror.s6 import (  # noqa: E402
     build_envelope,
     collect_artifacts,
@@ -60,6 +61,21 @@ def extract_classes_jar(aar: Path, out_dir: Path) -> Path:
     path = out_dir / "classes.jar"
     path.write_bytes(data)
     return path
+
+
+DEFAULT_POLICY = {
+    "schema": "forgemirror.policy/1",
+    "version": 1,
+    "min_shell_version": "0.1.0",
+    "rules": [
+        {"pattern": "shared_prefs/*.xml", "action": "encrypt"},
+        {"pattern": "files/harness.txt", "action": "encrypt"},
+    ],
+    "excludes": [
+        {"pattern": "databases/*"},
+        {"pattern": "cache/**"},
+    ],
+}
 
 
 def main() -> None:
@@ -152,6 +168,17 @@ def main() -> None:
             config = json.loads(archive.read("assets/shield/config.json"))
         config["container"] = "container.fdx"
         config["key"] = "shield/k_content.bin"
+        config["policy"] = "shield/policy.pkg"
+        config["build_id"] = args.build_id
+        build_id_bytes = uuid.UUID(args.build_id).bytes
+        policy_alg = "ecdsa-p256-sha256-raw" if args.alg == "ecdsa-p256-sha256" else args.alg
+        policy_pkg = pack_policy(
+            DEFAULT_POLICY,
+            k_content=k_content,
+            build_id=build_id_bytes,
+            private_key=signing_key,
+            alg=policy_alg,
+        )
 
         injected = tmp / "injected.apk"
         build_without_dex(
@@ -164,6 +191,7 @@ def main() -> None:
                     config, indent=2, sort_keys=True
                 ).encode("utf-8"),
                 "assets/shield/k_content.bin": k_content,
+                "assets/shield/policy.pkg": policy_pkg,
                 "assets/shield/trusted_key.der": der,
             },
         )
@@ -173,6 +201,7 @@ def main() -> None:
             "assets/container.fdx",
             "assets/shield/config.json",
             "assets/shield/k_content.bin",
+            "assets/shield/policy.pkg",
             "assets/shield/trusted_key.der",
         }
         payload = {
