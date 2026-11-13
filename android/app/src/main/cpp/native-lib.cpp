@@ -7,6 +7,8 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <chrono>
+#include <thread>
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_dev_forgemirror_demo_MainActivity_stringFromJNI(
@@ -181,4 +183,31 @@ Java_dev_forgemirror_demo_MainActivity_nativeProbeMmapWrite(
     env->ReleaseStringUTFChars(value, data);
     env->ReleaseStringUTFChars(path, text);
     return error;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_dev_forgemirror_demo_MainActivity_nativeProbeHoldWrite(
+        JNIEnv* env,
+        jobject /* this */,
+        jstring path,
+        jstring value,
+        jint millis) {
+    const char* text = env->GetStringUTFChars(path, nullptr);
+    const char* data = env->GetStringUTFChars(value, nullptr);
+    if (text == nullptr || data == nullptr) {
+        return -1;
+    }
+    std::string target(text);
+    std::string payload(data);
+    env->ReleaseStringUTFChars(value, data);
+    env->ReleaseStringUTFChars(path, text);
+    std::thread([target, payload, millis] {
+        int fd = open(target.c_str(), O_RDWR);
+        if (fd >= 0) {
+            ::write(fd, payload.data(), payload.size());
+            std::this_thread::sleep_for(std::chrono::milliseconds(millis));
+            close(fd);
+        }
+    }).detach();
+    return 0;
 }

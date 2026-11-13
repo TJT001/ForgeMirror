@@ -22,8 +22,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 final class ShieldFileWatch {
     private static final String TAG = "ShieldFileWatch";
     private static final AtomicBoolean STARTED = new AtomicBoolean();
-    private static FileObserver observer;
-    private static FileObserver parentObserver;
+    private static final List<FileObserver> observers = new ArrayList<>();
 
     private ShieldFileWatch() {
     }
@@ -37,19 +36,10 @@ final class ShieldFileWatch {
             Log.w(TAG, "cannot create " + dir);
             return;
         }
-        observer = new FileObserver(dir.getAbsolutePath(),
-                FileObserver.DELETE | FileObserver.MOVED_FROM
-                        | FileObserver.DELETE_SELF | FileObserver.MOVE_SELF
-                        | FileObserver.ATTRIB) {
-            @Override
-            public void onEvent(int event, String path) {
-                handle(context, config, event, path);
-            }
-        };
-        observer.startWatching();
+        watchTree(context, config, dir, 0);
         File filesDir = context.getFilesDir();
         if (filesDir != null && filesDir.isDirectory()) {
-            parentObserver = new FileObserver(filesDir.getAbsolutePath(),
+            FileObserver parent = new FileObserver(filesDir.getAbsolutePath(),
                     FileObserver.DELETE | FileObserver.MOVED_FROM
                             | FileObserver.DELETE_SELF | FileObserver.MOVE_SELF) {
                 @Override
@@ -59,9 +49,36 @@ final class ShieldFileWatch {
                     }
                 }
             };
-            parentObserver.startWatching();
+            parent.startWatching();
+            observers.add(parent);
         }
         Log.i(TAG, "watching " + dir);
+    }
+
+    private static void watchTree(Context context, ShieldConfig config, File dir, int depth) {
+        if (dir == null || !dir.isDirectory() || depth > 4) {
+            return;
+        }
+        FileObserver watcher = new FileObserver(dir.getAbsolutePath(),
+                FileObserver.DELETE | FileObserver.MOVED_FROM
+                        | FileObserver.DELETE_SELF | FileObserver.MOVE_SELF
+                        | FileObserver.ATTRIB) {
+            @Override
+            public void onEvent(int event, String path) {
+                handle(context, config, event, path);
+            }
+        };
+        watcher.startWatching();
+        observers.add(watcher);
+        File[] children = dir.listFiles();
+        if (children == null) {
+            return;
+        }
+        for (File child : children) {
+            if (child.isDirectory()) {
+                watchTree(context, config, child, depth + 1);
+            }
+        }
     }
 
     private static void handle(Context context, ShieldConfig config, int event, String path) {

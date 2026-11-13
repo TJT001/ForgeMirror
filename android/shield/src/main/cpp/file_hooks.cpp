@@ -5,6 +5,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/uio.h>
 #include <unistd.h>
 
 #include <linux/openat2.h>
@@ -16,8 +17,10 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <chrono>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <vector>
 
@@ -47,9 +50,13 @@ struct ShadowMap {
     int fd;
 };
 std::vector<ShadowMap> gShadowMaps;
+std::mutex gDirtyLock;
+std::unordered_set<int> gDirtyFds;
+std::atomic<bool> gSchedulerStarted{false};
 
 bool is_covered(const char *path);
 bool deny_now();
+void java_sync_shadow(int fd, bool close);
 bool write_flags(int flags);
 
 using open_t = int (*)(const char *, int, ...);
@@ -69,6 +76,9 @@ using mmap64_t = void *(*)(void *, size_t, int, int, int, off64_t);
 using fsync_t = int (*)(int);
 using munmap_t = int (*)(void *, size_t);
 using msync_t = int (*)(void *, size_t, int);
+using write_t = ssize_t (*)(int, const void *, size_t);
+using pwrite64_t = ssize_t (*)(int, const void *, size_t, off64_t);
+using writev_t = ssize_t (*)(int, const struct iovec *, int);
 #if defined(__aarch64__)
 using syscall_t = long (*)(long, ...);
 #endif
@@ -93,6 +103,9 @@ fsync_t g_fsync = nullptr;
 fsync_t g_fdatasync = nullptr;
 munmap_t g_munmap = nullptr;
 msync_t g_msync = nullptr;
+write_t g_write = nullptr;
+pwrite64_t g_pwrite64 = nullptr;
+writev_t g_writev = nullptr;
 #if defined(__aarch64__)
 syscall_t g_syscall = nullptr;
 #endif
@@ -108,8 +121,42 @@ void remember_shadow(int fd) {
 }
 
 void forget_shadow(int fd) {
-    std::lock_guard<std::mutex> guard(gShadowLock);
-    gShadowFds.erase(fd);
+    {
+        std::lock_guard<std::mutex> guard(gShadowLock);
+        gShadowFds.erase(fd);
+    }
+    std::lock_guard<std::mutex> guard(gDirtyLock);
+    gDirtyFds.erase(fd);
+}
+
+void mark_dirty(int fd) {
+    if (!is_shadow(fd)) {
+        return;
+    }
+    std::lock_guard<std::mutex> guard(gDirtyLock);
+    gDirtyFds.insert(fd);
+}
+
+std::vector<int> take_dirty() {
+    std::lock_guard<std::mutex> guard(gDirtyLock);
+    std::vector<int> dirty(gDirtyFds.begin(), gDirtyFds.end());
+    gDirtyFds.clear();
+    return dirty;
+}
+
+void start_sync_scheduler() {
+    bool expected = false;
+    if (!gSchedulerStarted.compare_exchange_strong(expected, true)) {
+        return;
+    }
+    std::thread([] {
+        while (true) {
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+            for (int fd : take_dirty()) {
+                java_sync_shadow(fd, false);
+            }
+        }
+    }).detach();
 }
 
 void remember_map(void *addr, size_t length, int fd) {
@@ -696,6 +743,36 @@ int proxy_openat2_how(int dirfd, const char *path, struct open_how *how, size_t 
     return prev != nullptr ? prev(dirfd, path, how, size) : -1;
 }
 
+ssize_t proxy_write(int fd, const void *buffer, size_t count) {
+    SHADOWHOOK_STACK_SCOPE();
+    auto prev = (write_t) shadowhook_get_prev_func((void *) &proxy_write);
+    ssize_t result = prev != nullptr ? prev(fd, buffer, count) : -1;
+    if (result > 0) {
+        mark_dirty(fd);
+    }
+    return result;
+}
+
+ssize_t proxy_pwrite64(int fd, const void *buffer, size_t count, off64_t offset) {
+    SHADOWHOOK_STACK_SCOPE();
+    auto prev = (pwrite64_t) shadowhook_get_prev_func((void *) &proxy_pwrite64);
+    ssize_t result = prev != nullptr ? prev(fd, buffer, count, offset) : -1;
+    if (result > 0) {
+        mark_dirty(fd);
+    }
+    return result;
+}
+
+ssize_t proxy_writev(int fd, const struct iovec *iov, int count) {
+    SHADOWHOOK_STACK_SCOPE();
+    auto prev = (writev_t) shadowhook_get_prev_func((void *) &proxy_writev);
+    ssize_t result = prev != nullptr ? prev(fd, iov, count) : -1;
+    if (result > 0) {
+        mark_dirty(fd);
+    }
+    return result;
+}
+
 int proxy_close(int fd) {
     SHADOWHOOK_STACK_SCOPE();
     if (!gInternal && is_shadow(fd)) {
@@ -777,7 +854,11 @@ int proxy_ftruncate(int fd, off_t length) {
         return -1;
     }
     auto prev = (ftruncate_t) shadowhook_get_prev_func((void *) &proxy_ftruncate);
-    return prev != nullptr ? prev(fd, length) : -1;
+    int result = prev != nullptr ? prev(fd, length) : -1;
+    if (result == 0) {
+        mark_dirty(fd);
+    }
+    return result;
 }
 
 void *proxy_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
@@ -792,6 +873,7 @@ void *proxy_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t o
     void *result = prev != nullptr ? prev(addr, length, prot, flags, fd, offset) : MAP_FAILED;
     if (result != MAP_FAILED && (prot & PROT_WRITE) != 0 && is_shadow(fd)) {
         remember_map(result, length, fd);
+        mark_dirty(fd);
     }
     return result;
 }
@@ -808,6 +890,7 @@ void *proxy_mmap64(void *addr, size_t length, int prot, int flags, int fd, off64
     void *result = prev != nullptr ? prev(addr, length, prot, flags, fd, offset) : MAP_FAILED;
     if (result != MAP_FAILED && (prot & PROT_WRITE) != 0 && is_shadow(fd)) {
         remember_map(result, length, fd);
+        mark_dirty(fd);
     }
     return result;
 }
@@ -872,6 +955,10 @@ void install() {
 #if defined(__aarch64__)
     hook("syscall", reinterpret_cast<void *>(&proxy_syscall), &g_syscall);
 #endif
+    hook("write", reinterpret_cast<void *>(&proxy_write), &g_write);
+    hook("pwrite64", reinterpret_cast<void *>(&proxy_pwrite64), &g_pwrite64);
+    hook("writev", reinterpret_cast<void *>(&proxy_writev), &g_writev);
+    start_sync_scheduler();
     gInstalled.store(true, std::memory_order_release);
 }
 

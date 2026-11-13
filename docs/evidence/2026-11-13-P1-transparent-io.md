@@ -163,3 +163,12 @@ ShieldSelfCheck: self check ok shellLibs=0
 ShieldDetect: no runtime findings
 ShieldDetectionBridge: registered
 ```
+
+### 周期回写与递归监控（本轮）
+
+- 透明 I/O 增加 dirty 跟踪：`write/pwrite64/writev/ftruncate/write mmap` 标记 shadow fd；
+  后台线程每 2 秒调用 Java `sync`，把未 close 的 memfd 内容写回 FMF2，降低崩溃丢失窗口。
+- 设备探针：native 线程持有 writable shadow fd 写入 `P2XYZ6` 并 sleep 5s，主线程 3s 后
+  通过 Java facade 读回 `P2XYZ6`；日志可见周期 `sync fd=...`。
+- `ShieldFileWatch` 改为递归扫描 `files/shield` 子树（深度 4），并保留 `files/` 父目录观察。
+- 崩溃恢复仍非事务日志：最多丢约 2 秒未同步写入；>64 MiB 仍走拒绝/回退路径。
