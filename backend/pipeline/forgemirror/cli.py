@@ -116,6 +116,9 @@ def protect_apk(
     corrupt_section_names: bool = typer.Option(
         True, "--corrupt-section-names/--keep-section-names"
     ),
+    self_decrypt_text: bool = typer.Option(
+        True, "--self-decrypt-text/--no-self-decrypt-text"
+    ),
     key_dir: Path = typer.Option(Path("artifacts/keys"), "--key-dir"),
     alg: str = typer.Option("ecdsa-p256-sha256", "--alg"),
     shell_version: str = typer.Option("0.1.0", "--shell-version"),
@@ -167,6 +170,7 @@ def protect_apk(
             self_decrypt_core=self_decrypt_core,
             decoy_dynamic=decoy_dynamic,
             corrupt_section_names=corrupt_section_names,
+            self_decrypt_text=self_decrypt_text,
             alg=alg,
         ),
         tools,
