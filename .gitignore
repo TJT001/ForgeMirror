@@ -12,6 +12,7 @@ artifacts/
 **/node_modules/
 frontend/dist/
 backend/bin/
+backend/data/
 *.jks
 *.keystore
 
