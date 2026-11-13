@@ -17,6 +17,17 @@ public final class HarnessRemoteService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.i(TAG, "onStartCommand pid=" + Process.myPid());
+        try (dev.forgemirror.shield.ShieldRandomAccess random =
+                     ShieldStorageFacade.openRandomAccessFile(
+                             this, "harness_ra_renamed.txt", "r")) {
+            byte[] sample = new byte[6];
+            int read = random.read(sample);
+            Log.i(TAG, "remote ra len=" + random.length() + " data="
+                    + new String(sample, 0, Math.max(read, 0),
+                    java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Exception error) {
+            Log.w(TAG, "remote ra read failed: " + error);
+        }
         stopSelf(startId);
         return START_NOT_STICKY;
     }

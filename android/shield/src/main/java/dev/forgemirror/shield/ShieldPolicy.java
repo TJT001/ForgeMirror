@@ -84,14 +84,14 @@ final class ShieldPolicy {
         for (int index = 0; index < json.optJSONArray("rules").length(); index++) {
             JSONObject rule = json.getJSONArray("rules").getJSONObject(index);
             if ("encrypt".equals(rule.optString("action"))) {
-                policy.rules.add(compile(rule.getString("pattern")));
+                policy.rules.add(compilePattern(rule.getString("pattern")));
             }
         }
         JSONArray excludeArray = json.optJSONArray("excludes");
         if (excludeArray != null) {
             for (int index = 0; index < excludeArray.length(); index++) {
                 policy.excludes.add(
-                        compile(excludeArray.getJSONObject(index).getString("pattern")));
+                        compilePattern(excludeArray.getJSONObject(index).getString("pattern")));
             }
         }
         return policy;
@@ -128,16 +128,23 @@ final class ShieldPolicy {
 
     /**
      * Pattern semantics per docs/formats/policy-v1.md: '*' matches within one
-     * path segment, '**' across segments, '?' a single character.
+     * path segment, '**' across segments, '?' a single character. '**&#47;'
+     * matches zero or more leading segments so files/**&#47;*.txt also covers
+     * top-level files.
      */
-    private static Pattern compile(String pattern) {
+    static Pattern compilePattern(String pattern) {
         StringBuilder regex = new StringBuilder();
         for (int index = 0; index < pattern.length(); index++) {
             char current = pattern.charAt(index);
             if (current == '*') {
                 if (index + 1 < pattern.length() && pattern.charAt(index + 1) == '*') {
-                    regex.append(".*");
                     index++;
+                    if (index + 1 < pattern.length() && pattern.charAt(index + 1) == '/') {
+                        regex.append("(?:.*/)?");
+                        index++;
+                    } else {
+                        regex.append(".*");
+                    }
                 } else {
                     regex.append("[^/]*");
                 }

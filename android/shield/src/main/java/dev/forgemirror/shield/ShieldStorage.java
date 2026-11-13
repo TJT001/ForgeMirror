@@ -36,4 +36,11 @@ public final class ShieldStorage {
                 ? context.getApplicationContext() : context;
         return ShieldContextAdapter.openFileInput(base, name);
     }
+
+    public static ShieldRandomAccess openRandomAccessFile(
+            Context context, String name, String mode) throws java.io.FileNotFoundException {
+        Context base = context.getApplicationContext() != null
+                ? context.getApplicationContext() : context;
+        return ShieldContextAdapter.openRandomAccessFile(base, name, mode);
+    }
 }

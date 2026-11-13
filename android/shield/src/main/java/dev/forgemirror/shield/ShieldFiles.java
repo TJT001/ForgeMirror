@@ -43,6 +43,21 @@ final class ShieldFiles {
         }
     }
 
+    static ShieldRandomAccess openRandomAccess(File target, byte[] key, String mode)
+            throws FileNotFoundException {
+        File parent = target.getParentFile();
+        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
+            throw new FileNotFoundException("cannot create " + parent);
+        }
+        try {
+            return new ShieldRandomAccess(target, key, mode);
+        } catch (IOException error) {
+            FileNotFoundException failure = new FileNotFoundException(target.getPath());
+            failure.initCause(error);
+            throw failure;
+        }
+    }
+
     static FileInputStream openInput(File source, byte[] key) throws IOException {
         if (!source.isFile()) {
             throw new FileNotFoundException(source.getPath());

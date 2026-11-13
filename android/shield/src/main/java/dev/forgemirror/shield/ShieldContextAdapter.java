@@ -83,4 +83,13 @@ final class ShieldContextAdapter {
         }
         return base.openFileInput(name);
     }
+
+    static ShieldRandomAccess openRandomAccessFile(Context base, String name, String mode)
+            throws java.io.FileNotFoundException {
+        if (ShieldRuntime.protects("files/" + name)) {
+            return ShieldFiles.openRandomAccess(new File(base.getFilesDir(), name),
+                    ShieldRuntime.fileKey(), mode);
+        }
+        return ShieldRandomAccess.plain(new File(base.getFilesDir(), name), mode);
+    }
 }

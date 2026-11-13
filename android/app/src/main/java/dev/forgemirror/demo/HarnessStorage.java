@@ -45,6 +45,27 @@ public final class HarnessStorage {
             Log.e(TAG, "covered file append failed", error);
         }
 
+        try (dev.forgemirror.shield.ShieldRandomAccess random =
+                     ShieldStorageFacade.openRandomAccessFile(
+                             context, "harness_ra.txt", "rw")) {
+            random.setLength(0);
+            random.write("0123456789".getBytes(StandardCharsets.UTF_8));
+            random.seek(3);
+            random.write("XYZ".getBytes(StandardCharsets.UTF_8));
+            random.setLength(6);
+        } catch (IOException error) {
+            Log.e(TAG, "covered random access failed", error);
+        }
+
+        File randomFile = new File(context.getFilesDir(), "harness_ra.txt");
+        File renamed = new File(context.getFilesDir(), "harness_ra_renamed.txt");
+        if (renamed.exists() && !renamed.delete()) {
+            Log.w(TAG, "previous renamed file not deleted");
+        }
+        if (randomFile.isFile() && !randomFile.renameTo(renamed)) {
+            Log.w(TAG, "encrypted rename failed");
+        }
+
         // Direct stream, no context openFileOutput call site: demonstrates the
         // interception boundary — this file stays plaintext by design in P1-D.
         File plain = new File(context.getFilesDir(), "harness_plain.txt");
@@ -88,7 +109,22 @@ public final class HarnessStorage {
         boolean prefsOk = lastWrite != null && counter > 0;
         boolean fileOk = fileText != null && fileText.startsWith("harness ");
         boolean appendOk = fileText != null && fileText.contains("appended");
+
+        boolean randomOk = false;
+        try (dev.forgemirror.shield.ShieldRandomAccess random =
+                     ShieldStorageFacade.openRandomAccessFile(
+                             context, "harness_ra_renamed.txt", "r")) {
+            byte[] sample = new byte[3];
+            long randomLength = random.length();
+            random.seek(1);
+            int read = random.read(sample);
+            randomOk = randomLength == 6 && read == 3
+                    && "12X".equals(new String(sample, StandardCharsets.UTF_8));
+        } catch (IOException error) {
+            Log.e(TAG, "covered random access read failed", error);
+        }
+
         return "readback prefs=" + prefsOk + " counter=" + counter
-                + " file=" + fileOk + " append=" + appendOk;
+                + " file=" + fileOk + " append=" + appendOk + " ra=" + randomOk;
     }
 }
