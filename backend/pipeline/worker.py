@@ -105,6 +105,12 @@ def run_pipeline(task: dict) -> tuple[bool, str | None, str | None, dict]:
     auth_url = os.environ.get("AUTH_URL", "")
     if auth_url:
         command.extend(["--auth-url", auth_url])
+    event_url = os.environ.get("EVENT_URL", "")
+    if event_url:
+        command.extend(["--event-url", event_url])
+    event_token = os.environ.get("EVENT_TOKEN", "")
+    if event_token:
+        command.extend(["--event-token", event_token])
     if os.environ.get("NO_KEY_ASSET", "").lower() in ("1", "true", "yes"):
         command.append("--no-key-asset")
     env = dict(os.environ)

@@ -16,6 +16,8 @@ final class ShieldConfig {
     final String buildId;
     final String authUrl;
     final String rules;
+    final String eventUrl;
+    final String eventToken;
 
     private ShieldConfig(
             String originalApplication,
@@ -28,7 +30,9 @@ final class ShieldConfig {
             String policy,
             String buildId,
             String authUrl,
-            String rules) {
+            String rules,
+            String eventUrl,
+            String eventToken) {
         this.originalApplication = originalApplication;
         this.originalFactory = originalFactory;
         this.shellVersion = shellVersion;
@@ -40,6 +44,8 @@ final class ShieldConfig {
         this.buildId = buildId;
         this.authUrl = authUrl;
         this.rules = rules;
+        this.eventUrl = eventUrl;
+        this.eventToken = eventToken;
     }
 
     static ShieldConfig load(Context context) throws Exception {
@@ -55,6 +61,8 @@ final class ShieldConfig {
                 json.optString("policy", ""),
                 json.optString("build_id", ""),
                 json.optString("auth_url", ""),
-                json.optString("rules", "shield/rules.pkr"));
+                json.optString("rules", "shield/rules.pkr"),
+                json.optString("event_url", ""),
+                json.optString("event_token", ""));
     }
 }

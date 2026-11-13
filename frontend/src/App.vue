@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 interface TaskEvent {
   id: number
@@ -12,12 +12,22 @@ interface TaskEvent {
   message?: string
 }
 
+interface SecurityEvent {
+  id: number
+  app_package: string
+  kind: string
+  rule_id?: string
+  confidence: number
+  created_at: string
+}
+
 const file = ref<File | null>(null)
 const profile = ref('basic')
 const signingMode = ref('customer_local')
 const taskId = ref('')
 const status = ref('')
 const events = ref<TaskEvent[]>([])
+const securityEvents = ref<SecurityEvent[]>([])
 const progress = ref(0)
 const error = ref('')
 const busy = ref(false)
@@ -32,6 +42,20 @@ function onFileChange(event: Event) {
   const input = event.target as HTMLInputElement
   file.value = input.files?.[0] ?? null
 }
+
+async function loadSecurityEvents() {
+  try {
+    const response = await fetch('/api/v1/events?limit=50')
+    if (response.ok) {
+      const payload = await response.json()
+      securityEvents.value = payload.events ?? []
+    }
+  } catch {
+    // The panel is best-effort; keep the last successful snapshot.
+  }
+}
+
+onMounted(loadSecurityEvents)
 
 async function upload() {
   error.value = ''
@@ -80,6 +104,7 @@ function subscribe() {
     progress.value = 100
     busy.value = false
     source.close()
+    loadSecurityEvents()
   })
   source.onerror = () => {
     source.close()
@@ -147,6 +172,20 @@ async function cancel() {
           <span class="msg">{{ event.message ?? event.reason_code ?? '' }}</span>
         </li>
       </ul>
+    </section>
+
+    <section class="card">
+      <div class="meta">
+        <span>安全事件</span>
+        <el-button size="small" @click="loadSecurityEvents">刷新</el-button>
+      </div>
+      <el-table :data="securityEvents" size="small" empty-text="暂无事件">
+        <el-table-column prop="created_at" label="时间" width="210" />
+        <el-table-column prop="app_package" label="应用" min-width="160" />
+        <el-table-column prop="kind" label="类型" width="110" />
+        <el-table-column prop="rule_id" label="规则" width="140" />
+        <el-table-column prop="confidence" label="置信度" width="90" />
+      </el-table>
     </section>
   </main>
 </template>

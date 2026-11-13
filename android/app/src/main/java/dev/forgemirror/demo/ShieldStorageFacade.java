@@ -23,8 +23,12 @@ public final class ShieldStorageFacade {
 
     public static FileOutputStream openFileOutput(Context context, String name)
             throws java.io.FileNotFoundException {
-        return dev.forgemirror.shield.ShieldStorage.openFileOutput(
-                context, name, Context.MODE_PRIVATE);
+        return openFileOutput(context, name, Context.MODE_PRIVATE);
+    }
+
+    public static FileOutputStream openFileOutput(Context context, String name, int mode)
+            throws java.io.FileNotFoundException {
+        return dev.forgemirror.shield.ShieldStorage.openFileOutput(context, name, mode);
     }
 
     public static FileInputStream openFileInput(Context context, String name)

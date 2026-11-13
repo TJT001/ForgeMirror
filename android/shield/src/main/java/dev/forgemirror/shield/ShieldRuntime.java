@@ -8,6 +8,8 @@ import android.os.Debug;
 import android.os.SystemClock;
 import android.util.Log;
 
+import org.json.JSONObject;
+
 import java.io.File;
 import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
@@ -91,6 +93,7 @@ public final class ShieldRuntime {
                 }
                 fileKey = ShieldPolicy.deriveFileKey(key, config.buildId);
                 rules = ShieldRules.load(context, config, key);
+                ShieldEvents.init(context, config, fileKey);
                 byte[] container = ShieldAssets.read(context, config.container);
                 byte[][] dex = ShieldContainer.open(container, key);
                 ByteBuffer[] buffers = new ByteBuffer[dex.length];
@@ -221,8 +224,19 @@ public final class ShieldRuntime {
         ruleScanStarted = true;
         Thread thread = new Thread(() -> {
             long started = SystemClock.elapsedRealtime();
-            List<String> matches = active.scanApk(context.getApplicationInfo().sourceDir);
-            Log.i(TAG, "rule scan done matches=" + matches
+            List<ShieldRules.Match> matches =
+                    active.scanApk(context.getApplicationInfo().sourceDir);
+            for (ShieldRules.Match match : matches) {
+                try {
+                    JSONObject payload = new JSONObject();
+                    payload.put("entry", match.entry);
+                    ShieldEvents.record("rule_hit", match.ruleId, 0.7,
+                            match.sha256, payload);
+                } catch (Exception error) {
+                    Log.w(TAG, "event record failed: " + error);
+                }
+            }
+            Log.i(TAG, "rule scan done matches=" + matches.size()
                     + " ms=" + (SystemClock.elapsedRealtime() - started));
         }, "shield-rule-scan");
         thread.setDaemon(true);

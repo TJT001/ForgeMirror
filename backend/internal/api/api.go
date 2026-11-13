@@ -53,6 +53,9 @@ func (s *Server) Router() *gin.Engine {
 	api.GET("/auth/grants/:id", s.getGrantStatus)
 	api.POST("/auth/grants/:id/revoke", s.revokeGrant)
 
+	api.POST("/events", s.clientAuth, s.addSecurityEvents)
+	api.GET("/events", s.listSecurityEvents)
+
 	worker := api.Group("/worker", s.workerAuth)
 	worker.POST("/claim", s.claimTask)
 	worker.POST("/tasks/:id/heartbeat", s.heartbeat)
@@ -306,6 +309,59 @@ func (s *Server) revokeGrant(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"revoked": true})
 }
 
+func (s *Server) clientAuth(c *gin.Context) {
+	if c.GetHeader("X-Client-Token") != s.cfg.ClientToken {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid client token"})
+		return
+	}
+	c.Next()
+}
+
+func (s *Server) addSecurityEvents(c *gin.Context) {
+	var request struct {
+		AppPackage string                   `json:"app_package"`
+		DeviceID   string                   `json:"device_id"`
+		Events     []store.NewSecurityEvent `json:"events"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || request.AppPackage == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "app_package and events required"})
+		return
+	}
+	if len(request.Events) == 0 || len(request.Events) > 200 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "events must contain 1..200 items"})
+		return
+	}
+	for _, event := range request.Events {
+		if event.Kind == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "event kind required"})
+			return
+		}
+	}
+	var deviceID *string
+	if request.DeviceID != "" {
+		deviceID = &request.DeviceID
+	}
+	if err := s.store.AddSecurityEvents(c.Request.Context(), request.AppPackage,
+		deviceID, request.Events); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"accepted": len(request.Events)})
+}
+
+func (s *Server) listSecurityEvents(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	events, err := s.store.ListSecurityEvents(c.Request.Context(), limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"events": events})
+}
+
 func (s *Server) workerAuth(c *gin.Context) {
 	if c.GetHeader("X-Worker-Token") != s.cfg.WorkerToken {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid worker token"})
@@ -361,8 +417,8 @@ func (s *Server) heartbeat(c *gin.Context) {
 
 func (s *Server) addEvents(c *gin.Context) {
 	var request struct {
-		Attempt int               `json:"attempt"`
-		Events  []store.NewEvent  `json:"events"`
+		Attempt int              `json:"attempt"`
+		Events  []store.NewEvent `json:"events"`
 	}
 	if err := c.ShouldBindJSON(&request); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid events"})

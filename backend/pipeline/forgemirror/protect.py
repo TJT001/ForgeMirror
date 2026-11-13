@@ -76,6 +76,8 @@ class ProtectOptions:
     profile: str = "basic"
     signing_mode: str = "customer_local"
     auth_url: str = ""
+    event_url: str = ""
+    event_token: str = "dev-client-token"
     no_key_asset: bool = False
     key_dir: Path = Path("artifacts/keys")
     alg: str = "ecdsa-p256-sha256"
@@ -148,7 +150,8 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
     original_application, original_factory = document.application_names()
     version_code = document.manifest_version_code() or 0
 
-    cleartext = options.auth_url.startswith("http://")
+    cleartext = (options.auth_url.startswith("http://")
+                 or options.event_url.startswith("http://"))
     document.rewrite_application(
         "dev.forgemirror.shield.ShieldApplication",
         "dev.forgemirror.shield.ShieldAppComponentFactory",
@@ -204,6 +207,8 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             "rules": "shield/rules.pkr",
             "build_id": options.build_id,
             "auth_url": options.auth_url,
+            "event_url": options.event_url,
+            "event_token": options.event_token,
             "app_id": package,
             "build_salt": secrets.token_hex(16),
         }

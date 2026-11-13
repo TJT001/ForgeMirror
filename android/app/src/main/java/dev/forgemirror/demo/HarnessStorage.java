@@ -38,6 +38,13 @@ public final class HarnessStorage {
             Log.e(TAG, "covered file write failed", error);
         }
 
+        try (FileOutputStream out = ShieldStorageFacade.openFileOutput(
+                context, "harness.txt", Context.MODE_APPEND)) {
+            out.write("appended\n".getBytes(StandardCharsets.UTF_8));
+        } catch (IOException error) {
+            Log.e(TAG, "covered file append failed", error);
+        }
+
         // Direct stream, no context openFileOutput call site: demonstrates the
         // interception boundary — this file stays plaintext by design in P1-D.
         File plain = new File(context.getFilesDir(), "harness_plain.txt");
@@ -80,7 +87,8 @@ public final class HarnessStorage {
 
         boolean prefsOk = lastWrite != null && counter > 0;
         boolean fileOk = fileText != null && fileText.startsWith("harness ");
+        boolean appendOk = fileText != null && fileText.contains("appended");
         return "readback prefs=" + prefsOk + " counter=" + counter
-                + " file=" + fileOk;
+                + " file=" + fileOk + " append=" + appendOk;
     }
 }

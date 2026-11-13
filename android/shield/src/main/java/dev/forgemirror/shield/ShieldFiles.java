@@ -29,15 +29,13 @@ final class ShieldFiles {
 
     static FileOutputStream openOutput(File target, int mode, byte[] key)
             throws FileNotFoundException {
-        if ((mode & android.content.Context.MODE_APPEND) != 0) {
-            throw new FileNotFoundException("MODE_APPEND not supported yet: " + target);
-        }
+        boolean append = (mode & android.content.Context.MODE_APPEND) != 0;
         File parent = target.getParentFile();
         if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
             throw new FileNotFoundException("cannot create " + parent);
         }
         try {
-            return new ShieldFileOutputStream(target, key);
+            return new ShieldFileOutputStream(target, key, append);
         } catch (IOException error) {
             FileNotFoundException failure = new FileNotFoundException(target.getPath());
             failure.initCause(error);
@@ -109,10 +107,34 @@ final class ShieldFiles {
         private final byte[] key;
         private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
 
-        ShieldFileOutputStream(File target, byte[] key) throws IOException {
+        ShieldFileOutputStream(File target, byte[] key, boolean append) throws IOException {
             super(new File(target.getParentFile(), target.getName() + ".tmp"));
             this.target = target;
             this.key = key;
+            if (append && target.isFile()) {
+                byte[] existing = new byte[(int) target.length()];
+                try (FileInputStream in = new FileInputStream(target)) {
+                    int offset = 0;
+                    while (offset < existing.length) {
+                        int read = in.read(existing, offset, existing.length - offset);
+                        if (read < 0) {
+                            break;
+                        }
+                        offset += read;
+                    }
+                }
+                byte[] plaintext = ShieldCrypto.isFileEncrypted(existing)
+                        ? decryptExisting(existing) : existing;
+                buffer.write(plaintext, 0, plaintext.length);
+            }
+        }
+
+        private byte[] decryptExisting(byte[] blob) throws IOException {
+            try {
+                return ShieldCrypto.fileDecrypt(blob, key);
+            } catch (Exception error) {
+                throw new IOException("append target rejected", error);
+            }
         }
 
         @Override

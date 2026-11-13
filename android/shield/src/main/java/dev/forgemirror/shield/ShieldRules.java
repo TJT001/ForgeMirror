@@ -11,9 +11,11 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -98,8 +100,20 @@ final class ShieldRules {
         }
     }
 
-    List<String> scanApk(String apkPath) {
-        List<String> matches = new ArrayList<>();
+    static final class Match {
+        final String ruleId;
+        final String entry;
+        final String sha256;
+
+        Match(String ruleId, String entry, String sha256) {
+            this.ruleId = ruleId;
+            this.entry = entry;
+            this.sha256 = sha256;
+        }
+    }
+
+    List<Match> scanApk(String apkPath) {
+        List<Match> matches = new ArrayList<>();
         long budget = MAX_SCAN_BYTES;
         try (ZipFile archive = new ZipFile(apkPath)) {
             for (ZipEntry entry : java.util.Collections.list(archive.entries())) {
@@ -112,7 +126,7 @@ final class ShieldRules {
                 budget -= data.length;
                 for (Rule rule : rules) {
                     if (rule.matches(data)) {
-                        matches.add(rule.id);
+                        matches.add(new Match(rule.id, entry.getName(), sha256(data)));
                         Log.w(TAG, "rule matched: " + rule.id + " in " + entry.getName());
                     }
                 }
@@ -124,6 +138,19 @@ final class ShieldRules {
             Log.w(TAG, "scan failed: " + error);
         }
         return matches;
+    }
+
+    private static String sha256(byte[] data) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(data);
+            StringBuilder builder = new StringBuilder(digest.length * 2);
+            for (byte item : digest) {
+                builder.append(String.format(Locale.US, "%02x", item & 0xff));
+            }
+            return builder.toString();
+        } catch (Exception error) {
+            return "";
+        }
     }
 
     static byte[] read(InputStream stream, long limit) throws Exception {

@@ -9,5 +9,7 @@
   "key": "",
   "policy": "shield/policy.pkg",
   "rules": "shield/rules.pkr",
+  "event_url": "",
+  "event_token": "",
   "build_id": ""
 }

@@ -8,6 +8,7 @@ type Config struct {
 	MigrationsDir   string
 	DataDir         string
 	WorkerToken     string
+	ClientToken     string
 	MaxUploadBytes  int64
 	LeaseSeconds    int
 	ChallengeTTLSec int
@@ -21,6 +22,7 @@ func Load() Config {
 		MigrationsDir:   env("MIGRATIONS_DIR", "migrations"),
 		DataDir:         env("DATA_DIR", "data"),
 		WorkerToken:     env("WORKER_TOKEN", "dev-worker-token"),
+		ClientToken:     env("CLIENT_TOKEN", "dev-client-token"),
 		MaxUploadBytes:  512 << 20,
 		LeaseSeconds:    60,
 		ChallengeTTLSec: 300,
