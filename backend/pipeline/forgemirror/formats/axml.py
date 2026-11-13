@@ -363,8 +363,19 @@ def _encode_string_pool(strings: list[str], flags: int) -> bytes:
     return bytes(result)
 
 
-def _serialize_start_element(element: StartElement) -> bytes:
-    attribute_count = len(element.attrs)
+def _serialize_start_element(
+    element: StartElement, resource_ids: list[int]
+) -> bytes:
+    # AssetManager resolves android: attributes by resource ID and only sees
+    # them when they are sorted ascending; appended attributes otherwise stay
+    # invisible (e.g. usesCleartextTraffic).
+    def sort_key(attr: Attr) -> int:
+        if attr.name < len(resource_ids) and resource_ids[attr.name]:
+            return resource_ids[attr.name]
+        return 0xFFFFFFFF
+
+    attributes = sorted(element.attrs, key=sort_key)
+    attribute_count = len(attributes)
     size = 36 + 20 * attribute_count
     result = bytearray(
         struct.pack("<HHI", CHUNK_START_ELEMENT, 16, size)
@@ -373,7 +384,7 @@ def _serialize_start_element(element: StartElement) -> bytes:
     result.extend(struct.pack("<II", element.ns, element.name))
     result.extend(struct.pack("<HHH", 20, 20, attribute_count))
     result.extend(struct.pack("<HHH", 0, 0, 0))
-    for attr in element.attrs:
+    for attr in attributes:
         result.extend(
             struct.pack(
                 "<IIIHBBI",
@@ -420,7 +431,7 @@ def serialize(document: Document) -> bytes:
                 )
             )
         elif isinstance(chunk, StartElement):
-            body.extend(_serialize_start_element(chunk))
+            body.extend(_serialize_start_element(chunk, resource_ids))
         elif isinstance(chunk, EndElement):
             body.extend(
                 struct.pack(
