@@ -73,6 +73,16 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (intent != null && intent.getBooleanExtra("probe_now", false)) {
+            String path = getFilesDir() + "/harness_ra_renamed.txt";
+            android.util.Log.i("HarnessProbe", "post-block writeErr="
+                    + nativeProbeWrite(path) + " text=" + nativeProbeText(path));
+        }
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         Log.i(TAG, "onResume");

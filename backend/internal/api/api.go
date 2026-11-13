@@ -523,8 +523,8 @@ func (s *Server) setClientConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "app_package required"})
 		return
 	}
-	if request.Response != "log" && request.Response != "toast" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "response must be log or toast"})
+	if request.Response != "log" && request.Response != "toast" && request.Response != "block" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "response must be log, toast or block"})
 		return
 	}
 	if request.Policies == nil {
@@ -535,8 +535,8 @@ func (s *Server) setClientConfig(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "unknown detection rule: " + rule})
 			return
 		}
-		if response != "log" && response != "toast" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "policy response must be log or toast"})
+		if response != "log" && response != "toast" && response != "block" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "policy response must be log, toast or block"})
 			return
 		}
 	}

@@ -31,6 +31,7 @@ std::mutex gLock;
 std::string gDataDir;
 std::atomic<bool> gEnforce{false};
 std::atomic<bool> gInstalled{false};
+std::atomic<bool> gBlocked{false};
 std::string gFdPaths[kMaxFds];
 JavaVM *gVm = nullptr;
 jclass gIoClass = nullptr;
@@ -319,6 +320,12 @@ bool write_flags(int flags) {
     return (flags & (O_WRONLY | O_RDWR | O_CREAT | O_TRUNC | O_APPEND)) != 0;
 }
 
+bool blocked_now(const std::string &resolved) {
+    return !gInternal && gBlocked.load(std::memory_order_relaxed) &&
+           !resolved.empty() && is_covered(resolved.c_str()) &&
+           app_native_caller();
+}
+
 void log_deny(const char *operation, const char *path) {
     __android_log_print(ANDROID_LOG_WARN, kTag, "deny %s %s", operation,
                         path == nullptr ? "(null)" : path);
@@ -339,6 +346,11 @@ int proxy_open(const char *path, int flags, ...) {
     mode_t mode = mode_from_args(flags, args);
     va_end(args);
     std::string resolved = resolve_at(AT_FDCWD, path);
+    if (blocked_now(resolved)) {
+        log_deny("blocked", resolved.c_str());
+        errno = EACCES;
+        return -1;
+    }
     if (!gInternal && !resolved.empty()) {
         int shadow = try_shadow_open(resolved.c_str(), flags);
         if (shadow >= 0) {
@@ -367,6 +379,11 @@ int proxy_openat(int dirfd, const char *path, int flags, ...) {
     va_end(args);
     std::string resolved = (path != nullptr && path[0] == '/')
             ? std::string(path) : resolve_at(dirfd, path);
+    if (blocked_now(resolved)) {
+        log_deny("blocked", resolved.c_str());
+        errno = EACCES;
+        return -1;
+    }
     if (!gInternal && !resolved.empty()) {
         int shadow = try_shadow_open(resolved.c_str(), flags);
         if (shadow >= 0) {
@@ -394,6 +411,11 @@ int proxy_open64(const char *path, int flags, ...) {
     mode_t mode = mode_from_args(flags, args);
     va_end(args);
     std::string resolved = resolve_at(AT_FDCWD, path);
+    if (blocked_now(resolved)) {
+        log_deny("blocked", resolved.c_str());
+        errno = EACCES;
+        return -1;
+    }
     if (!gInternal && !resolved.empty()) {
         int shadow = try_shadow_open(resolved.c_str(), flags);
         if (shadow >= 0) {
@@ -422,6 +444,11 @@ int proxy_openat64(int dirfd, const char *path, int flags, ...) {
     va_end(args);
     std::string resolved = (path != nullptr && path[0] == '/')
             ? std::string(path) : resolve_at(dirfd, path);
+    if (blocked_now(resolved)) {
+        log_deny("blocked", resolved.c_str());
+        errno = EACCES;
+        return -1;
+    }
     if (!gInternal && !resolved.empty()) {
         int shadow = try_shadow_open(resolved.c_str(), flags);
         if (shadow >= 0) {
@@ -445,6 +472,11 @@ int proxy_openat64(int dirfd, const char *path, int flags, ...) {
 int proxy_open2(const char *path, int flags) {
     SHADOWHOOK_STACK_SCOPE();
     std::string resolved = resolve_at(AT_FDCWD, path);
+    if (blocked_now(resolved)) {
+        log_deny("blocked", resolved.c_str());
+        errno = EACCES;
+        return -1;
+    }
     if (!gInternal && !resolved.empty()) {
         int shadow = try_shadow_open(resolved.c_str(), flags);
         if (shadow >= 0) {
@@ -469,6 +501,11 @@ int proxy_openat2(int dirfd, const char *path, int flags) {
     SHADOWHOOK_STACK_SCOPE();
     std::string resolved = (path != nullptr && path[0] == '/')
             ? std::string(path) : resolve_at(dirfd, path);
+    if (blocked_now(resolved)) {
+        log_deny("blocked", resolved.c_str());
+        errno = EACCES;
+        return -1;
+    }
     if (!gInternal && !resolved.empty()) {
         int shadow = try_shadow_open(resolved.c_str(), flags);
         if (shadow >= 0) {
@@ -630,6 +667,11 @@ int proxy_openat2_how(int dirfd, const char *path, struct open_how *how, size_t 
     int flags = static_cast<int>(how->flags);
     std::string resolved = (path != nullptr && path[0] == '/')
             ? std::string(path) : resolve_at(dirfd, path);
+    if (blocked_now(resolved)) {
+        log_deny("blocked.openat2", resolved.c_str());
+        errno = EACCES;
+        return -1;
+    }
     if (!gInternal && !resolved.empty() && is_covered(resolved.c_str()) && deny_now()) {
         int shadow = try_shadow_open(resolved.c_str(), flags);
         if (shadow >= 0) {
@@ -885,4 +927,14 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
         env->ExceptionClear();
     }
     return JNI_VERSION_1_6;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_forgemirror_shield_ShieldNativeFileHook_nativeSetBlocked(
+    JNIEnv *env, jclass type, jboolean blocked) {
+    (void) env;
+    (void) type;
+    gBlocked.store(blocked == JNI_TRUE, std::memory_order_release);
+    __android_log_print(ANDROID_LOG_WARN, kTag, "blocked=%d",
+                        blocked == JNI_TRUE ? 1 : 0);
 }

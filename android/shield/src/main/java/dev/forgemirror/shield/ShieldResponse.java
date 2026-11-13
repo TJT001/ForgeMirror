@@ -29,7 +29,14 @@ final class ShieldResponse {
             String selected = ShieldServerConfig.responseFor(
                     context, finding.ruleId, mode);
             Log.w(TAG, "response rule=" + finding.ruleId + " mode=" + selected);
-            if ("toast".equals(selected)) {
+            if ("block".equals(selected)) {
+                try {
+                    ShieldNativeFileHook.setBlocked(true);
+                } catch (Throwable error) {
+                    Log.w(TAG, "block unavailable: " + error);
+                }
+                toastKinds.add(finding.kind);
+            } else if ("toast".equals(selected)) {
                 toastKinds.add(finding.kind);
             }
         }

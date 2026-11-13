@@ -124,3 +124,25 @@ Go build / vet         通过
 - 端口/进程扫描受 Android 10+ `/proc` 权限限制，`/proc/net/tcp` 在部分 ROM 被 SELinux 拒绝。
 - 响应仍只有 log/toast；block/degrade 未定义安全动作。
 - YARA `pe` 模块仍因 crypto/PE 依赖未启用；`hash` 模块仅内置三种哈希。
+
+### 响应档 `block`
+
+- 服务端/客户端新增 `block` 档：命中后设置 native `gBlocked`，业务 native 对覆盖路径的
+  `open/openat/open64/openat64/__open_2/__openat_2/openat2` 一律返回 `EACCES`。
+- Java/框架调用（`gInternal` 或 libjavacore/libcore 等）不受影响，避免把壳自身 I/O 拦死。
+- 设备验证：
+  ```text
+  ShieldFileWatch: tamper delete:events.seen.fmf
+  ShieldResponse: response rule=file_tamper mode=block
+  ShieldHook: blocked=1
+  ```
+  随后业务 native 的 `deny blocked` 生效；进程重启后解除。
+- 仍无 kill/exit；`block` 是文件访问阻断，不是进程终止。
+
+### 增补测试
+
+```text
+Python pipeline 61 项
+Shield JVM      17 项
+Go build/vet    通过
+```
