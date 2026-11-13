@@ -50,6 +50,8 @@ HarnessRemoteService: merge probe wrote remote pid=...
 ShieldNativeIo: sync fd=62 bytes=200000 merged=true written=1 conflicts=0
 ShieldNativeIo: sync fd=62 bytes=200000 merged=true written=0 conflicts=0
 MainActivity: merge probe result writeErr=0 closeErr=0 main=MAIN remote=REMOTE
+files/harness.txt magic: 46 4d 46 32 (FMF2)
+readback: file=true append=true
 ```
 
 第二次同步 `written=0` 说明合并后基线已刷新，不会把自身写入误判成远端冲突。
@@ -63,4 +65,4 @@ v2rayNG 2.4.0 回归 `bootstrap ok state=4`，MMKV 正常，无 WAL/commit/tmp �
 2. 长度冲突同样是 local-wins，可能丢弃远端的截断/扩展结果；
 3. 基线哈希在打开时捕获，不是分布式锁；文件被整体替换（`file_id` 变化）时退回 full 本地写入；
 4. 跨进程仍由文件锁串行化，没有多写者同时应用 WAL；
-5. `ShieldFiles`（FMF1 缓冲写入）未接入该合并路径。
+5. `ShieldFiles` 已改为 FMF2/WAL，append 模式接入合并；非 append 保持截断语义（完整本地写入），不做远端合并。

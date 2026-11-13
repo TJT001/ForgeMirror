@@ -56,7 +56,7 @@ Demo harness 的 `firstFrameMs` 包含 3 秒探针 sleep，不计入基线。
 
 | 类别 | 遗留 | 影响 |
 |---|---|---|
-| 崩溃恢复 | FMF2 已有增量 WAL + 前滚/回滚；旧 FMJ1 仅兼容；目录 fsync 尽力而为 | 掉电原子性未对所有 ROM 证明；`ShieldFiles` 未接入日志 |
+| 崩溃恢复 | FMF2 已有增量 WAL + 前滚/回滚；旧 FMJ1 仅兼容；目录 fsync 尽力而为 | 掉电原子性未对所有 ROM 证明；`ShieldFiles` 已接入 FMF2/WAL |
 | 并发 | 跨进程已做分块三方合并；同块冲突 local-wins，块级非字节级；多写者仍由文件锁串行应用 WAL | 同块并发修改会丢弃远端版本；无分布式锁 |
 | 锁语义 | `flock/fcntl` 作用在 memfd，不与真实文件锁互通 | 依赖文件锁的 native 代码需适配 |
 | 系统调用 | 内联 `svc`、`io_uring` 未覆盖；`openat2.resolve` 未模拟 | 直接 syscall 可绕过透明 I/O |

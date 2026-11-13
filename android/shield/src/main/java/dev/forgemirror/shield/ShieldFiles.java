@@ -16,9 +16,9 @@ import java.nio.file.StandardCopyOption;
 
 /**
  * Encrypted replacements for Context.openFileOutput/openFileInput on paths the
- * policy matches. Output buffers in memory and writes an FMF1 envelope
- * atomically at close; input serves decrypted bytes through a pipe so callers
- * still receive a genuine FileInputStream.
+ * policy matches. Output buffers in memory and persists FMF2 at close (append
+ * uses the same cross-process merge as native I/O); input serves decrypted
+ * bytes through a pipe so callers still receive a genuine FileInputStream.
  */
 final class ShieldFiles {
     private static final String TAG = "ShieldFiles";
@@ -90,6 +90,9 @@ final class ShieldFiles {
         if (!source.isFile()) {
             throw new FileNotFoundException(source.getPath());
         }
+        if (ShieldChunkStore.matches(source)) {
+            return pipeInput(ShieldChunkStore.readAll(source, key));
+        }
         byte[] blob = new byte[(int) source.length()];
         try (FileInputStream in = new FileInputStream(source)) {
             int offset = 0;
@@ -148,37 +151,41 @@ final class ShieldFiles {
     private static final class ShieldFileOutputStream extends FileOutputStream {
         private final File target;
         private final byte[] key;
+        private final boolean append;
         private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        private final byte[] baselineFileId;
+        private final int baselineChunkSize;
+        private final int baselineLength;
+        private final byte[][] baselineHashes;
         private boolean closed;
 
         ShieldFileOutputStream(File target, byte[] key, boolean append) throws IOException {
             super(new File(target.getParentFile(), target.getName() + ".tmp"));
             this.target = target;
             this.key = key;
+            this.append = append;
+            byte[] existing = new byte[0];
+            byte[] fileId = null;
+            int chunkSize = ShieldChunkStore.DEFAULT_CHUNK_SIZE;
+            byte[][] hashes = null;
             if (append && target.isFile()) {
-                byte[] existing = new byte[(int) target.length()];
-                try (FileInputStream in = new FileInputStream(target)) {
-                    int offset = 0;
-                    while (offset < existing.length) {
-                        int read = in.read(existing, offset, existing.length - offset);
-                        if (read < 0) {
-                            break;
-                        }
-                        offset += read;
+                if (ShieldChunkStore.matches(target)) {
+                    try (ShieldChunkStore store =
+                                 ShieldChunkStore.open(target, key, "r")) {
+                        existing = store.readAllBytes();
+                        chunkSize = store.chunkSize();
+                        fileId = store.fileIdCopy();
+                        hashes = ShieldChunkStore.chunkHashes(existing, chunkSize);
                     }
+                } else {
+                    existing = ShieldFiles.readAllPlaintext(target, key);
                 }
-                byte[] plaintext = ShieldCrypto.isFileEncrypted(existing)
-                        ? decryptExisting(existing) : existing;
-                buffer.write(plaintext, 0, plaintext.length);
+                buffer.write(existing, 0, existing.length);
             }
-        }
-
-        private byte[] decryptExisting(byte[] blob) throws IOException {
-            try {
-                return ShieldCrypto.fileDecrypt(blob, key);
-            } catch (Exception error) {
-                throw new IOException("append target rejected", error);
-            }
+            this.baselineFileId = fileId;
+            this.baselineChunkSize = chunkSize;
+            this.baselineLength = existing.length;
+            this.baselineHashes = hashes;
         }
 
         @Override
@@ -205,32 +212,29 @@ final class ShieldFiles {
             if (buffer.size() > MAX_BUFFER) {
                 throw new IOException("encrypted file too large for in-memory buffer");
             }
-            byte[] blob;
+            byte[] plaintext = buffer.toByteArray();
             try {
-                blob = ShieldCrypto.fileEncrypt(buffer.toByteArray(), key);
-            } catch (Exception error) {
-                super.close();
-                throw new IOException("encrypt failed: " + target, error);
-            }
-            try {
-                super.write(blob, 0, blob.length);
-                super.flush();
-                getFD().sync();
+                if (append && baselineHashes != null) {
+                    ShieldChunkStore.MergeResult result =
+                            ShieldChunkStore.writeMerged(target, key, plaintext,
+                                    baselineFileId, baselineChunkSize,
+                                    baselineLength, baselineHashes);
+                    if (result.conflicts > 0) {
+                        Log.w(TAG, "merge conflicts=" + result.conflicts
+                                + " path=" + target);
+                    }
+                } else {
+                    ShieldChunkStore.writeAll(target, key, plaintext);
+                }
             } finally {
                 super.close();
-            }
-            try {
-                Files.move(getTemp().toPath(), target.toPath(),
-                        StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (IOException moveFailure) {
-                if (!getTemp().renameTo(target)) {
-                    throw new IOException("atomic move failed: " + target, moveFailure);
+                File temp = new File(target.getParentFile(),
+                        target.getName() + ".tmp");
+                if (temp.isFile()) {
+                    //noinspection ResultOfMethodCallIgnored
+                    temp.delete();
                 }
             }
-        }
-
-        private File getTemp() {
-            return new File(target.getParentFile(), target.getName() + ".tmp");
         }
     }
 }

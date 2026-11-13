@@ -14,7 +14,7 @@
 | `applyWalFile` | 校验 footer SHA-256、新头部 AEAD、每条块 AEAD；增量 WAL 再校验 `base_file_id`；校验通过后写头部/块并 `setLength` |
 | `prepareWal` / `prepareWalPatch` | 测试用 WAL 生成入口（完整镜像 / 单块增量） |
 | `writeAll` | 已有合法目标先逐块比较，只把差异块标记 dirty，再由 WAL 记录；无差异时跳过 WAL/fsync；目标损坏/缺失才走 full WAL |
-| `ShieldFiles.ShieldFileOutputStream` | `close()` 幂等，避免 finalizer 二次 close 写入已关闭流 |
+| `ShieldFiles.ShieldFileOutputStream` | 改为 FMF2 + `writeAll`/`writeMerged`；`close()` 幂等，append 接入跨进程合并 |
 
 ## WAL 格式（`FMW1`）
 
@@ -85,4 +85,4 @@ files/ 下无 WAL/提交/临时文件残留
 3. 目录 fsync 失败被吞掉，掉电场景不能对所有设备作绝对保证。
 4. 跨进程写由文件锁串行化，没有多写者合并。
 5. 旧 `FMJ1` 提交日志只做兼容恢复，新写入不再生成完整临时镜像。
-6. `ShieldFiles` 的 `.tmp` 原子替换未接入同一 WAL。
+6. `ShieldFiles` 输出已接入 FMF2/WAL；非 FMF2 旧文件首次写入会迁移为 FMF2。
