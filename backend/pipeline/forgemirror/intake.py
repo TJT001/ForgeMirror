@@ -78,7 +78,9 @@ def run_intake(
     if result.min_sdk is None:
         result.reason_codes.append(errors.E_MANIFEST_UNREADABLE)
     elif result.min_sdk < MIN_SDK:
-        result.reason_codes.append(errors.E_MIN_SDK)
+        # The shell loads DEX in memory (API 26+) and raises the manifest
+        # minSdkVersion during S6; keep the intake as a warning.
+        result.warnings.append(errors.W_MIN_SDK_RAISED)
 
     markers = hardened_markers(apk, xmltree)
     if markers:

@@ -19,6 +19,7 @@ CHUNK_END_ELEMENT = 0x0103
 CHUNK_CDATA = 0x0104
 
 TYPE_STRING = 0x03
+TYPE_INT_DEC = 0x10
 TYPE_INT_BOOLEAN = 0x12
 
 ANDROID_NS = "http://schemas.android.com/apk/res/android"
@@ -29,6 +30,7 @@ RESOURCE_IDS = {
     "authorities": 0x01010018,
     "usesCleartextTraffic": 0x010104EC,
     "appComponentFactory": 0x0101057A,
+    "minSdkVersion": 0x0101020C,
 }
 
 SORTED_FLAG = 0x00000001
@@ -152,6 +154,42 @@ class Document:
         element.attrs.append(
             Attr(ns_index, self.index_of(name), value_index, TYPE_STRING, value_index)
         )
+
+    def set_int_attr(self, element: StartElement, name: str, value: int) -> None:
+        ns_index = self.android_ns_index()
+        for attr in element.attrs:
+            if attr.ns == ns_index and self.strings[attr.name] == name:
+                attr.raw = 0xFFFFFFFF
+                attr.data_type = TYPE_INT_DEC
+                attr.data = value
+                return
+        element.attrs.append(
+            Attr(ns_index, self.index_of(name), 0xFFFFFFFF, TYPE_INT_DEC, value)
+        )
+
+    def raise_min_sdk(self, minimum: int) -> int | None:
+        try:
+            index = self.find_start("uses-sdk")
+        except AxmlError:
+            manifest = self.find_start("manifest")
+            name = self.index_of("uses-sdk")
+            self.chunks.insert(manifest + 2, EndElement(0xFFFFFFFF, name))
+            self.chunks.insert(manifest + 1,
+                               StartElement(0xFFFFFFFF, name))
+            index = manifest + 1
+        element = self.chunks[index]
+        ns_index = self.android_ns_index()
+        for attr in element.attrs:
+            if attr.ns != ns_index or self.strings[attr.name] != "minSdkVersion":
+                continue
+            current = attr.data if attr.data_type in (TYPE_INT_DEC, 0x11) else None
+            if current is None or current < minimum:
+                self.set_int_attr(element, "minSdkVersion", minimum)
+            self.chunks[index] = element
+            return current
+        self.set_int_attr(element, "minSdkVersion", minimum)
+        self.chunks[index] = element
+        return None
 
     def set_bool_attr(self, element: StartElement, name: str, value: bool) -> None:
         ns_index = self.android_ns_index()

@@ -10,6 +10,7 @@ from forgemirror.formats import axml  # noqa: E402
 from forgemirror.formats.axml import (  # noqa: E402
     ANDROID_NS,
     TYPE_INT_BOOLEAN,
+    TYPE_INT_DEC,
     TYPE_STRING,
     Attr,
     Document,
@@ -87,6 +88,39 @@ class AxmlTests(unittest.TestCase):
             "dev.forgemirror.shield.ShieldProvider",
         )
         self.assertIsNotNone(roundtrip.find_start("activity"))
+
+    def test_raise_min_sdk(self) -> None:
+        document = Document()
+        document.flags = 0
+        document.strings = [
+            "android", ANDROID_NS, "manifest", "uses-sdk", "minSdkVersion",
+        ]
+        document.chunks = [
+            StartNamespace(0, 1),
+            StartElement(0xFFFFFFFF, 2),
+            StartElement(0xFFFFFFFF, 3, [
+                Attr(1, 4, 0xFFFFFFFF, TYPE_INT_DEC, 24),
+            ]),
+            EndElement(0xFFFFFFFF, 3),
+            EndElement(0xFFFFFFFF, 2),
+            EndNamespace(0, 1),
+        ]
+        parsed = axml.parse(axml.serialize(document))
+        self.assertEqual(parsed.raise_min_sdk(26), 24)
+        reparsed = axml.parse(axml.serialize(parsed))
+        index = reparsed.find_start("uses-sdk")
+        element = reparsed.chunks[index]
+        self.assertEqual(element.attrs[0].data, 26)
+        self.assertEqual(element.attrs[0].data_type, TYPE_INT_DEC)
+        self.assertEqual(reparsed.raise_min_sdk(21), 26)
+        self.assertEqual(reparsed.chunks[index].attrs[0].data, 26)
+
+    def test_raise_min_sdk_inserts_missing_element(self) -> None:
+        document = _sample()
+        self.assertIsNone(document.raise_min_sdk(26))
+        reparsed = axml.parse(axml.serialize(document))
+        index = reparsed.find_start("uses-sdk")
+        self.assertEqual(reparsed.chunks[index].attrs[0].data, 26)
 
     def test_attributes_sorted_by_resource_id(self) -> None:
         document = Document()

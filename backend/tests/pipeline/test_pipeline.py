@@ -135,17 +135,17 @@ class IntakeTests(unittest.TestCase):
         self.assertEqual(result.cert_sha256, CERT)
         self.assertEqual(result.abis, ["arm64-v8a", "armeabi-v7a"])
 
-    def test_rejects_old_min_sdk(self) -> None:
+    def test_old_min_sdk_is_raised_warning(self) -> None:
         apk = make_apk(self.tmp)
         result = run_intake(
             apk,
             build_id=BUILD_ID,
             profile="basic",
             signing_mode="hsm",
-            tools=FakeTools(badging=BADGING.replace("minSdkVersion:'26'", "minSdkVersion:'25'")),
+            tools=FakeTools(badging=BADGING.replace("minSdkVersion:'26'", "minSdkVersion:'24'")),
         )
-        self.assertFalse(result.ok)
-        self.assertIn(errors.E_MIN_SDK, result.reason_codes)
+        self.assertTrue(result.ok)
+        self.assertIn(errors.W_MIN_SDK_RAISED, result.warnings)
 
     def test_rejects_hardened_apk(self) -> None:
         apk = make_apk(self.tmp, hardened=True)

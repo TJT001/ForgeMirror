@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -105,6 +106,29 @@ class AndroidTools:
                 str(apk),
             ]
         )
+
+    def debug_signer_sha256(self) -> str | None:
+        keystore = Path.home() / ".android" / "debug.keystore"
+        if not keystore.is_file():
+            return None
+        keytool = shutil.which("keytool")
+        if keytool is None:
+            java_home = os.environ.get("JAVA_HOME")
+            if java_home:
+                candidate = Path(java_home) / "bin" / "keytool"
+                if candidate.is_file():
+                    keytool = str(candidate)
+        if keytool is None:
+            return None
+        try:
+            output = self._run([
+                keytool, "-list", "-v", "-keystore", str(keystore),
+                "-storepass", "android", "-alias", "androiddebugkey",
+            ])
+        except ToolError:
+            return None
+        match = re.search(r"SHA256:\s*([0-9a-fA-F:]+)", output)
+        return match.group(1).replace(":", "").lower() if match else None
 
     def cert_sha256(self, apk: Path) -> str | None:
         try:

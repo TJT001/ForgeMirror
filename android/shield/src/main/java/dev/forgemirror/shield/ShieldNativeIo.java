@@ -38,15 +38,15 @@ final class ShieldNativeIo {
 
     static synchronized int open(String path, boolean writable) {
         if (appContext == null || path == null) {
-            return -1;
+            return -2;
         }
         byte[] key = ShieldRuntime.fileKey();
         if (key == null) {
-            return -1;
+            return -2;
         }
         String relative = relativePath(appContext, path);
         if (relative == null || !ShieldRuntime.protects(relative)) {
-            return -1;
+            return -2;
         }
         File target = new File(path);
         if (!writable && !target.isFile()) {
@@ -71,6 +71,14 @@ final class ShieldNativeIo {
             Log.w(TAG, "shadow open failed: " + error);
             return -1;
         }
+    }
+
+    static boolean protectedPath(String path) {
+        if (appContext == null || path == null) {
+            return false;
+        }
+        String relative = relativePath(appContext, path);
+        return relative != null && ShieldRuntime.protects(relative);
     }
 
     static synchronized void sync(int fd, boolean close) {

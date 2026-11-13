@@ -181,6 +181,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
         raise SystemExit("APK manifest has no package name")
     original_application, original_factory = document.application_names()
     version_code = document.manifest_version_code() or 0
+    raised_min_sdk = document.raise_min_sdk(26)
 
     cleartext = (options.auth_url.startswith("http://")
                  or options.event_url.startswith("http://"))
@@ -200,13 +201,33 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
     ])
     rewritten_manifest = axml.serialize(document)
 
-    cert = tools.cert_sha256(options.apk) or ""
+    input_cert = tools.cert_sha256(options.apk) or ""
+    signer_cert = None
+    if options.signing_mode == "hsm":
+        signer_cert = tools.debug_signer_sha256()
+        cert = signer_cert or input_cert
+    else:
+        cert = ""
     signing_key = load_or_create_key(options.key_dir, options.alg)
     der = public_der(signing_key)
     policy_alg = "ecdsa-p256-sha256-raw" if options.alg == "ecdsa-p256-sha256" else options.alg
 
     options.out.parent.mkdir(parents=True, exist_ok=True)
     warnings: list[str] = []
+    if raised_min_sdk is not None and raised_min_sdk < 26:
+        warnings.append(
+            f"minSdkVersion raised {raised_min_sdk} -> 26 (in-memory DEX loading)"
+        )
+    if not cert:
+        warnings.append(
+            "W_CERT_UNPINNED: signing certificate pin disabled for "
+            f"{options.signing_mode}"
+        )
+    elif options.signing_mode == "hsm" and signer_cert is None:
+        warnings.append(
+            "W_CERT_FALLBACK: could not read debug keystore; pinning the "
+            "input APK certificate"
+        )
     with tempfile.TemporaryDirectory(prefix="fm-protect-") as tmp:
         tmp = Path(tmp)
         stub_dex, shield_libs = _stub_from_aar(options.aar, tools, tmp)
@@ -389,6 +410,10 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
         "warnings": warnings,
         "signer_sha256": signer,
     }
+    if signed and signer and cert and signer != cert:
+        warnings.append(
+            f"W_SIGNER_MISMATCH: config pins {cert}, APK signed by {signer}"
+        )
     options.out.with_suffix(".protect.json").write_text(
         json.dumps(meta, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     )

@@ -41,6 +41,7 @@ JavaVM *gVm = nullptr;
 jclass gIoClass = nullptr;
 jmethodID gIoOpen = nullptr;
 jmethodID gIoSync = nullptr;
+jmethodID gIoProtected = nullptr;
 __thread bool gInternal = false;
 std::mutex gShadowLock;
 std::unordered_set<int> gShadowFds;
@@ -220,6 +221,40 @@ int java_open_plaintext(const char *path, bool writable) {
     return fd;
 }
 
+bool java_is_protected(const char *path) {
+    if (gVm == nullptr || gIoClass == nullptr || gIoProtected == nullptr) {
+        return true;
+    }
+    JNIEnv *env = nullptr;
+    bool attached = false;
+    jint status = gVm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if (gVm->AttachCurrentThread(&env, nullptr) != JNI_OK) {
+            return true;
+        }
+        attached = true;
+    } else if (status != JNI_OK) {
+        return true;
+    }
+    gInternal = true;
+    jstring target = env->NewStringUTF(path);
+    bool result = true;
+    if (target != nullptr) {
+        result = env->CallStaticBooleanMethod(gIoClass, gIoProtected,
+                                              target) == JNI_TRUE;
+        env->DeleteLocalRef(target);
+    }
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        result = true;
+    }
+    gInternal = false;
+    if (attached) {
+        gVm->DetachCurrentThread();
+    }
+    return result;
+}
+
 void java_sync_shadow(int fd, bool close) {
     if (gVm == nullptr || gIoClass == nullptr || gIoSync == nullptr) {
         return;
@@ -257,7 +292,7 @@ int try_shadow_open(const char *path, int flags) {
     }
     int fd = java_open_plaintext(path, write_flags(flags));
     if (fd < 0) {
-        return -1;
+        return fd == -2 ? -2 : -1;
     }
     if ((flags & O_TRUNC) != 0) {
         if (g_ftruncate != nullptr) {
@@ -337,7 +372,8 @@ std::string resolve_at(int dirfd, const char *path) {
 }
 
 void remember_fd(int fd, const char *path) {
-    if (fd < 0 || fd >= kMaxFds || path == nullptr || !is_covered(path)) {
+    if (fd < 0 || fd >= kMaxFds || path == nullptr || !is_covered(path) ||
+        !java_is_protected(path)) {
         return;
     }
     std::lock_guard<std::mutex> guard(gLock);
@@ -409,7 +445,7 @@ int proxy_open(const char *path, int flags, ...) {
         if (shadow >= 0) {
             return shadow;
         }
-        if (is_covered(resolved.c_str()) && deny_now()) {
+        if (shadow != -2 && is_covered(resolved.c_str()) && deny_now()) {
             if (errno == EEXIST) {
                 return -1;
             }
@@ -417,12 +453,6 @@ int proxy_open(const char *path, int flags, ...) {
                     ? EACCES : ENOENT;
             return -1;
         }
-    }
-    if (write_flags(flags) && !resolved.empty() && is_covered(resolved.c_str()) &&
-        deny_now()) {
-        log_deny("open", resolved.c_str());
-        errno = EACCES;
-        return -1;
     }
     auto prev = (open_t) shadowhook_get_prev_func((void *) &proxy_open);
     int fd = prev != nullptr ? prev(path, flags, mode) : -1;
@@ -450,7 +480,7 @@ int proxy_openat(int dirfd, const char *path, int flags, ...) {
         if (shadow >= 0) {
             return shadow;
         }
-        if (is_covered(resolved.c_str()) && deny_now()) {
+        if (shadow != -2 && is_covered(resolved.c_str()) && deny_now()) {
             if (errno == EEXIST) {
                 return -1;
             }
@@ -458,12 +488,6 @@ int proxy_openat(int dirfd, const char *path, int flags, ...) {
                     ? EACCES : ENOENT;
             return -1;
         }
-    }
-    if (write_flags(flags) && !resolved.empty() && is_covered(resolved.c_str()) &&
-        deny_now()) {
-        log_deny("openat", resolved.c_str());
-        errno = EACCES;
-        return -1;
     }
     auto prev = (openat_t) shadowhook_get_prev_func((void *) &proxy_openat);
     int fd = prev != nullptr ? prev(dirfd, path, flags, mode) : -1;
@@ -490,7 +514,7 @@ int proxy_open64(const char *path, int flags, ...) {
         if (shadow >= 0) {
             return shadow;
         }
-        if (is_covered(resolved.c_str()) && deny_now()) {
+        if (shadow != -2 && is_covered(resolved.c_str()) && deny_now()) {
             if (errno == EEXIST) {
                 return -1;
             }
@@ -498,12 +522,6 @@ int proxy_open64(const char *path, int flags, ...) {
                     ? EACCES : ENOENT;
             return -1;
         }
-    }
-    if (write_flags(flags) && !resolved.empty() && is_covered(resolved.c_str()) &&
-        deny_now()) {
-        log_deny("open64", resolved.c_str());
-        errno = EACCES;
-        return -1;
     }
     auto prev = (open_t) shadowhook_get_prev_func((void *) &proxy_open64);
     int fd = prev != nullptr ? prev(path, flags, mode) : -1;
@@ -531,7 +549,7 @@ int proxy_openat64(int dirfd, const char *path, int flags, ...) {
         if (shadow >= 0) {
             return shadow;
         }
-        if (is_covered(resolved.c_str()) && deny_now()) {
+        if (shadow != -2 && is_covered(resolved.c_str()) && deny_now()) {
             if (errno == EEXIST) {
                 return -1;
             }
@@ -539,12 +557,6 @@ int proxy_openat64(int dirfd, const char *path, int flags, ...) {
                     ? EACCES : ENOENT;
             return -1;
         }
-    }
-    if (write_flags(flags) && !resolved.empty() && is_covered(resolved.c_str()) &&
-        deny_now()) {
-        log_deny("openat64", resolved.c_str());
-        errno = EACCES;
-        return -1;
     }
     auto prev = (openat_t) shadowhook_get_prev_func((void *) &proxy_openat64);
     int fd = prev != nullptr ? prev(dirfd, path, flags, mode) : -1;
@@ -567,7 +579,7 @@ int proxy_open2(const char *path, int flags) {
         if (shadow >= 0) {
             return shadow;
         }
-        if (is_covered(resolved.c_str()) && deny_now()) {
+        if (shadow != -2 && is_covered(resolved.c_str()) && deny_now()) {
             if (errno == EEXIST) {
                 return -1;
             }
@@ -575,12 +587,6 @@ int proxy_open2(const char *path, int flags) {
                     ? EACCES : ENOENT;
             return -1;
         }
-    }
-    if (write_flags(flags) && !resolved.empty() && is_covered(resolved.c_str()) &&
-        deny_now()) {
-        log_deny("__open_2", resolved.c_str());
-        errno = EACCES;
-        return -1;
     }
     auto prev = (open2_t) shadowhook_get_prev_func((void *) &proxy_open2);
     int fd = prev != nullptr ? prev(path, flags) : -1;
@@ -604,7 +610,7 @@ int proxy_openat2(int dirfd, const char *path, int flags) {
         if (shadow >= 0) {
             return shadow;
         }
-        if (is_covered(resolved.c_str()) && deny_now()) {
+        if (shadow != -2 && is_covered(resolved.c_str()) && deny_now()) {
             if (errno == EEXIST) {
                 return -1;
             }
@@ -612,12 +618,6 @@ int proxy_openat2(int dirfd, const char *path, int flags) {
                     ? EACCES : ENOENT;
             return -1;
         }
-    }
-    if (write_flags(flags) && !resolved.empty() && is_covered(resolved.c_str()) &&
-        deny_now()) {
-        log_deny("__openat_2", resolved.c_str());
-        errno = EACCES;
-        return -1;
     }
     auto prev = (openat2_t) shadowhook_get_prev_func((void *) &proxy_openat2);
     int fd = prev != nullptr ? prev(dirfd, path, flags) : -1;
@@ -653,7 +653,7 @@ long proxy_syscall(long number, ...) {
             if (shadow >= 0) {
                 return shadow;
             }
-            if (write_flags(flags)) {
+            if (shadow != -2 && write_flags(flags)) {
                 log_deny("syscall.openat", resolved.c_str());
                 deny = true;
             }
@@ -668,7 +668,7 @@ long proxy_syscall(long number, ...) {
             if (shadow >= 0) {
                 return shadow;
             }
-            if (write_flags(flags)) {
+            if (shadow != -2 && write_flags(flags)) {
                 log_deny("syscall.open", path);
                 deny = true;
             }
@@ -698,7 +698,7 @@ long proxy_syscall(long number, ...) {
                 if (shadow >= 0) {
                     return shadow;
                 }
-                if (write_flags(flags)) {
+                if (shadow != -2 && write_flags(flags)) {
                     log_deny("syscall.openat2", resolved.c_str());
                     deny = true;
                 }
@@ -787,13 +787,15 @@ int proxy_openat2_how(int dirfd, const char *path, struct open_how *how, size_t 
             }
             return shadow;
         }
-        if (write_flags(flags) || access(resolved.c_str(), F_OK) == 0) {
-            log_deny("openat2", resolved.c_str());
-            errno = EACCES;
+        if (shadow != -2) {
+            if (write_flags(flags) || access(resolved.c_str(), F_OK) == 0) {
+                log_deny("openat2", resolved.c_str());
+                errno = EACCES;
+                return -1;
+            }
+            errno = ENOENT;
             return -1;
         }
-        errno = ENOENT;
-        return -1;
     }
     auto prev = (openat2_how_t) shadowhook_get_prev_func((void *) &proxy_openat2_how);
     return prev != nullptr ? prev(dirfd, path, how, size) : -1;
@@ -842,7 +844,7 @@ int proxy_close(int fd) {
 
 int proxy_rename(const char *from, const char *to) {
     SHADOWHOOK_STACK_SCOPE();
-    if ((is_covered(from) || is_covered(to)) && deny_now()) {
+    if ((java_is_protected(from) || java_is_protected(to)) && deny_now()) {
         log_deny("rename", from);
         errno = EACCES;
         return -1;
@@ -857,7 +859,8 @@ int proxy_renameat(int fromfd, const char *from, int tofd, const char *to) {
             ? std::string(from) : resolve_at(fromfd, from);
     std::string target = (to != nullptr && to[0] == '/')
             ? std::string(to) : resolve_at(tofd, to);
-    if ((is_covered(source.c_str()) || is_covered(target.c_str())) && deny_now()) {
+    if ((java_is_protected(source.c_str()) ||
+         java_is_protected(target.c_str())) && deny_now()) {
         log_deny("renameat", source.c_str());
         errno = EACCES;
         return -1;
@@ -868,7 +871,7 @@ int proxy_renameat(int fromfd, const char *from, int tofd, const char *to) {
 
 int proxy_unlink(const char *path) {
     SHADOWHOOK_STACK_SCOPE();
-    if (is_covered(path) && deny_now()) {
+    if (java_is_protected(path) && deny_now()) {
         log_deny("unlink", path);
         errno = EACCES;
         return -1;
@@ -881,7 +884,7 @@ int proxy_unlinkat(int dirfd, const char *path, int flags) {
     SHADOWHOOK_STACK_SCOPE();
     std::string resolved = (path != nullptr && path[0] == '/')
             ? std::string(path) : resolve_at(dirfd, path);
-    if (!resolved.empty() && is_covered(resolved.c_str()) && deny_now()) {
+    if (!resolved.empty() && java_is_protected(resolved.c_str()) && deny_now()) {
         log_deny("unlinkat", resolved.c_str());
         errno = EACCES;
         return -1;
@@ -892,7 +895,7 @@ int proxy_unlinkat(int dirfd, const char *path, int flags) {
 
 int proxy_truncate(const char *path, off_t length) {
     SHADOWHOOK_STACK_SCOPE();
-    if (is_covered(path) && deny_now()) {
+    if (java_is_protected(path) && deny_now()) {
         log_deny("truncate", path);
         errno = EACCES;
         return -1;
@@ -1062,7 +1065,10 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
         gIoClass = static_cast<jclass>(env->NewGlobalRef(type));
         gIoOpen = env->GetStaticMethodID(gIoClass, "open", "(Ljava/lang/String;Z)I");
         gIoSync = env->GetStaticMethodID(gIoClass, "sync", "(IZ)V");
-        if (gIoOpen == nullptr || gIoSync == nullptr) {
+        gIoProtected = env->GetStaticMethodID(
+                gIoClass, "protectedPath", "(Ljava/lang/String;)Z");
+        if (gIoOpen == nullptr || gIoSync == nullptr ||
+            gIoProtected == nullptr) {
             env->ExceptionClear();
         }
         env->DeleteLocalRef(type);
