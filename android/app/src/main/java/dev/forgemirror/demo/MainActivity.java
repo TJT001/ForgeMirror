@@ -50,8 +50,13 @@ public class MainActivity extends AppCompatActivity {
         }
 
         TextView tv = binding.sampleText;
+        String probeFile = getFilesDir() + "/harness_ra_renamed.txt";
+        String probe = "probe writeErr=" + nativeProbeWrite(probeFile)
+                + " readErr=" + nativeProbeRead(probeFile)
+                + " mmapErr=" + nativeProbeMmap(probeFile)
+                + " syscallErr=" + nativeProbeSyscall(probeFile);
         tv.setText(stringFromJNI() + "\n" + appStatus + "\n" + providerStatus
-                + "\n" + HarnessStorage.verify(this));
+                + "\n" + HarnessStorage.verify(this) + "\n" + probe);
     }
 
     @Override
@@ -75,4 +80,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public native String stringFromJNI();
+
+    public native int nativeProbeWrite(String path);
+
+    public native int nativeProbeRead(String path);
+
+    public native int nativeProbeMmap(String path);
+
+    public native int nativeProbeSyscall(String path);
 }

@@ -92,6 +92,13 @@ public final class ShieldRuntime {
                     return state;
                 }
                 fileKey = ShieldPolicy.deriveFileKey(key, config.buildId);
+                try {
+                    int hookStatus = ShieldNativeFileHook.configure(
+                            context.getApplicationInfo().dataDir, true);
+                    Log.i(TAG, "native file hooks status=" + hookStatus);
+                } catch (Throwable error) {
+                    Log.w(TAG, "native file hooks unavailable: " + error);
+                }
                 rules = ShieldRules.load(context, config, key);
                 ShieldEvents.init(context, config, fileKey);
                 byte[] container = ShieldAssets.read(context, config.container);

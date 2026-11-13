@@ -32,6 +32,13 @@ target_link_libraries(shield_yara PRIVATE yara log)
 target_compile_options(shield_yara PRIVATE -Wall -Wextra -Werror -fstack-protector-strong)
 target_link_options(shield_yara PRIVATE -Wl,-z,relro -Wl,-z,now)
 
+add_subdirectory(third_party/shadowhook)
+add_library(shield_hook SHARED file_hooks.cpp)
+target_include_directories(shield_hook PRIVATE third_party/shadowhook/include)
+target_link_libraries(shield_hook PRIVATE shadowhook log dl)
+target_compile_options(shield_hook PRIVATE -Wall -Wextra -Werror -fstack-protector-strong)
+target_link_options(shield_hook PRIVATE -Wl,-z,relro -Wl,-z,now)
+
 foreach(target shield_core shield_boot abi_compile_check)
     target_include_directories(${target} PRIVATE include)
     target_compile_options(${target} PRIVATE -Wall -Wextra -Werror -fstack-protector-strong)
