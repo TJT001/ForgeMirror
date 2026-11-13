@@ -53,9 +53,28 @@ final class ShieldNativeIo {
             return -1;
         }
         try {
-            byte[] plaintext = target.isFile()
-                    ? ShieldFiles.readAllPlaintext(target, key)
-                    : new byte[0];
+            byte[] plaintext;
+            int chunkSize = ShieldChunkStore.DEFAULT_CHUNK_SIZE;
+            byte[] baselineFileId = null;
+            byte[][] baselineHashes = null;
+            int baselineLength = 0;
+            if (target.isFile() && ShieldChunkStore.matches(target)) {
+                try (ShieldChunkStore store =
+                             ShieldChunkStore.open(target, key, "r")) {
+                    plaintext = store.readAllBytes();
+                    chunkSize = store.chunkSize();
+                    baselineFileId = store.fileIdCopy();
+                    baselineLength = plaintext.length;
+                    if (writable) {
+                        baselineHashes = ShieldChunkStore.chunkHashes(
+                                plaintext, chunkSize);
+                    }
+                }
+            } else {
+                plaintext = target.isFile()
+                        ? ShieldFiles.readAllPlaintext(target, key)
+                        : new byte[0];
+            }
             if (plaintext.length > maxFileBytes) {
                 return -1;
             }
@@ -64,7 +83,9 @@ final class ShieldNativeIo {
                     ParcelFileDescriptor.dup(descriptor.getFileDescriptor());
             int fd = exported.detachFd();
             synchronized (ShieldNativeIo.class) {
-                OPEN.put(fd, new State(target, writable, key, descriptor));
+                OPEN.put(fd, new State(target, writable, key, descriptor,
+                        baselineFileId, chunkSize, baselineLength,
+                        baselineHashes));
             }
             Log.i(TAG, "open shadow fd=" + fd + " path=" + path
                     + " writable=" + writable + " bytes=" + plaintext.length);
@@ -159,8 +180,44 @@ final class ShieldNativeIo {
                     throw new IllegalStateException("short pread: " + read);
                 }
             }
-            ShieldChunkStore.writeAll(state.target, state.key, data);
-            Log.i(TAG, "sync fd=" + fd + " bytes=" + data.length);
+            if (state.baselineHashes != null) {
+                ShieldChunkStore.MergeResult merge = ShieldChunkStore.writeMerged(
+                        state.target, state.key, data, state.baselineFileId,
+                        state.baselineChunkSize, state.baselineLength,
+                        state.baselineHashes);
+                if (merge.conflicts > 0) {
+                    Log.w(TAG, "merge conflicts=" + merge.conflicts
+                            + " path=" + state.target);
+                }
+                if (merge.merged) {
+                    state.baselineHashes = ShieldChunkStore.chunkHashes(
+                            data, state.baselineChunkSize);
+                    state.baselineLength = data.length;
+                } else {
+                    byte[] current = ShieldChunkStore.fileIdOf(
+                            state.target, state.key);
+                    if (current != null) {
+                        state.baselineFileId = current;
+                    }
+                    state.baselineHashes = ShieldChunkStore.chunkHashes(
+                            data, state.baselineChunkSize);
+                    state.baselineLength = data.length;
+                }
+                Log.i(TAG, "sync fd=" + fd + " bytes=" + data.length
+                        + " merged=" + merge.merged + " written="
+                        + merge.written + " conflicts=" + merge.conflicts);
+            } else {
+                ShieldChunkStore.writeAll(state.target, state.key, data);
+                byte[] current = ShieldChunkStore.fileIdOf(
+                        state.target, state.key);
+                if (current != null) {
+                    state.baselineFileId = current;
+                    state.baselineHashes = ShieldChunkStore.chunkHashes(
+                            data, state.baselineChunkSize);
+                    state.baselineLength = data.length;
+                }
+                Log.i(TAG, "sync fd=" + fd + " bytes=" + data.length);
+            }
         } catch (Exception error) {
             Log.w(TAG, "shadow sync failed: " + error);
         }
@@ -202,13 +259,24 @@ final class ShieldNativeIo {
         final boolean writable;
         final byte[] key;
         final ParcelFileDescriptor descriptor;
+        byte[] baselineFileId;
+        final int baselineChunkSize;
+        int baselineLength;
+        byte[][] baselineHashes;
         int refs = 1;
 
-        State(File target, boolean writable, byte[] key, ParcelFileDescriptor descriptor) {
+        State(File target, boolean writable, byte[] key,
+              ParcelFileDescriptor descriptor, byte[] baselineFileId,
+              int baselineChunkSize, int baselineLength,
+              byte[][] baselineHashes) {
             this.target = target;
             this.writable = writable;
             this.key = key;
             this.descriptor = descriptor;
+            this.baselineFileId = baselineFileId;
+            this.baselineChunkSize = baselineChunkSize;
+            this.baselineLength = baselineLength;
+            this.baselineHashes = baselineHashes;
         }
     }
 }

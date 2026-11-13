@@ -443,6 +443,102 @@ public final class ShieldChunkStoreTest {
         return digest.digest();
     }
 
+    private static byte[] prefix(byte[] data, int offset, int length) {
+        return Arrays.copyOfRange(data, offset, offset + length);
+    }
+
+    @Test
+    public void crossProcessMergePreservesDisjointChunks() throws Exception {
+        File target = new File(folder.getRoot(), "merge-disjoint.bin");
+        byte[] baselineData = pattern(200000, 51);
+        ShieldChunkStore.writeAll(target, KEY, baselineData);
+        int chunkSize;
+        byte[] fileId;
+        try (ShieldChunkStore store = ShieldChunkStore.open(target, KEY, "r")) {
+            chunkSize = store.chunkSize();
+            fileId = store.fileIdCopy();
+        }
+        byte[][] baselineHashes =
+                ShieldChunkStore.chunkHashes(baselineData, chunkSize);
+
+        byte[] remotePatch = pattern(100, 52);
+        try (ShieldChunkStore store = ShieldChunkStore.open(target, KEY, "rw")) {
+            store.write(2L * chunkSize, remotePatch, 0, remotePatch.length);
+        }
+        byte[] localData = baselineData.clone();
+        byte[] localPatch = pattern(100, 53);
+        System.arraycopy(localPatch, 0, localData, 0, localPatch.length);
+
+        ShieldChunkStore.MergeResult result = ShieldChunkStore.writeMerged(
+                target, KEY, localData, fileId, chunkSize,
+                baselineData.length, baselineHashes);
+        assertTrue(result.merged);
+        assertEquals(0, result.conflicts);
+        byte[] merged = readAll(target);
+        assertArrayEquals(localPatch, prefix(merged, 0, localPatch.length));
+        assertArrayEquals(remotePatch, prefix(merged,
+                2 * chunkSize, remotePatch.length));
+        assertEquals(baselineData[chunkSize + 10], merged[chunkSize + 10]);
+    }
+
+    @Test
+    public void crossProcessMergeConflictKeepsLocalChunk() throws Exception {
+        File target = new File(folder.getRoot(), "merge-conflict.bin");
+        byte[] baselineData = pattern(150000, 54);
+        ShieldChunkStore.writeAll(target, KEY, baselineData);
+        int chunkSize;
+        byte[] fileId;
+        try (ShieldChunkStore store = ShieldChunkStore.open(target, KEY, "r")) {
+            chunkSize = store.chunkSize();
+            fileId = store.fileIdCopy();
+        }
+        byte[][] baselineHashes =
+                ShieldChunkStore.chunkHashes(baselineData, chunkSize);
+        byte[] remotePatch = pattern(120, 55);
+        try (ShieldChunkStore store = ShieldChunkStore.open(target, KEY, "rw")) {
+            store.write(0, remotePatch, 0, remotePatch.length);
+        }
+        byte[] localData = baselineData.clone();
+        byte[] localPatch = pattern(120, 56);
+        System.arraycopy(localPatch, 0, localData, 0, localPatch.length);
+        ShieldChunkStore.MergeResult result = ShieldChunkStore.writeMerged(
+                target, KEY, localData, fileId, chunkSize,
+                baselineData.length, baselineHashes);
+        assertTrue(result.conflicts > 0);
+        assertArrayEquals(localPatch,
+                prefix(readAll(target), 0, localPatch.length));
+    }
+
+    @Test
+    public void mergePreservesRemoteGrowthWhenLocalLengthUnchanged() throws Exception {
+        File target = new File(folder.getRoot(), "merge-grow.bin");
+        byte[] baselineData = pattern(120000, 57);
+        ShieldChunkStore.writeAll(target, KEY, baselineData);
+        int chunkSize;
+        byte[] fileId;
+        try (ShieldChunkStore store = ShieldChunkStore.open(target, KEY, "r")) {
+            chunkSize = store.chunkSize();
+            fileId = store.fileIdCopy();
+        }
+        byte[][] baselineHashes =
+                ShieldChunkStore.chunkHashes(baselineData, chunkSize);
+        byte[] remoteData = pattern(180000, 58);
+        System.arraycopy(baselineData, 0, remoteData, 0, baselineData.length);
+        ShieldChunkStore.writeAll(target, KEY, remoteData);
+
+        byte[] localData = baselineData.clone();
+        byte[] localPatch = pattern(64, 59);
+        System.arraycopy(localPatch, 0, localData, 0, localPatch.length);
+        ShieldChunkStore.MergeResult result = ShieldChunkStore.writeMerged(
+                target, KEY, localData, fileId, chunkSize,
+                baselineData.length, baselineHashes);
+        byte[] merged = readAll(target);
+        assertEquals(remoteData.length, merged.length);
+        assertArrayEquals(localPatch, prefix(merged, 0, localPatch.length));
+        assertArrayEquals(prefix(remoteData, 150000, 100),
+                prefix(merged, 150000, 100));
+    }
+
     @Test
     public void writeAllUpdatesExistingChunksThroughWal() throws Exception {
         File target = new File(folder.getRoot(), "writeall-diff.bin");

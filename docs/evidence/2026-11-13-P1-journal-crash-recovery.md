@@ -47,7 +47,7 @@ WAL 删除后              -> 完成
 
 ## 测试
 
-`ShieldChunkStoreTest` 23 项通过，新增：
+`ShieldChunkStoreTest` 26 项通过（含跨进程合并 3 项），新增：
 
 - `incrementalWalOnlyLogsDirtyChunks`：修改首块，WAL 明显小于完整文件；
 - `writeAllUpdatesExistingChunksThroughWal`：生产 `writeAll` 对已有目标走差异块 WAL；
@@ -57,7 +57,7 @@ WAL 删除后              -> 完成
 - `committedJournalReplaysPreparedImage` 等旧 `FMJ1` 兼容用例继续通过；
 - 既有截断、stale tmp、并发锁、重命名、nonce 轮换用例继续通过。
 
-Shield JVM 总计 36 项。
+Shield JVM 总计 39 项。
 
 设备回归（demo，Pixel 5 / API 30）：
 

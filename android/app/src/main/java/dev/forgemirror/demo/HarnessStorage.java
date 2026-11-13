@@ -113,6 +113,25 @@ public final class HarnessStorage {
         }
     }
 
+    public static String readMergeProbe(Context context) {
+        try (dev.forgemirror.shield.ShieldRandomAccess random =
+                     ShieldStorageFacade.openRandomAccessFile(
+                             context, "merge_probe.txt", "r")) {
+            byte[] first = new byte[4];
+            random.seek(0);
+            int firstRead = random.read(first);
+            byte[] second = new byte[6];
+            random.seek(65536);
+            int secondRead = random.read(second);
+            return "main=" + new String(first, 0, Math.max(firstRead, 0),
+                    StandardCharsets.UTF_8)
+                    + " remote=" + new String(second, 0, Math.max(secondRead, 0),
+                    StandardCharsets.UTF_8);
+        } catch (Exception error) {
+            return "readErr=" + error;
+        }
+    }
+
     public static String readRandomText(Context context) {
         try (dev.forgemirror.shield.ShieldRandomAccess random =
                      ShieldStorageFacade.openRandomAccessFile(

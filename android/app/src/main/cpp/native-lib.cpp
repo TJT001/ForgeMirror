@@ -151,6 +151,46 @@ Java_dev_forgemirror_demo_MainActivity_nativeProbeWriteText(
 }
 
 extern "C" JNIEXPORT jint JNICALL
+Java_dev_forgemirror_demo_MainActivity_nativeProbeOpenMerge(
+        JNIEnv* env,
+        jobject /* this */,
+        jstring path) {
+    const char* text = env->GetStringUTFChars(path, nullptr);
+    if (text == nullptr) {
+        return -1;
+    }
+    int fd = open(text, O_RDWR);
+    env->ReleaseStringUTFChars(path, text);
+    return fd >= 0 ? fd : -errno;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_dev_forgemirror_demo_MainActivity_nativeProbePwrite(
+        JNIEnv* env,
+        jobject /* this */,
+        jint fd,
+        jint offset,
+        jstring value) {
+    const char* data = env->GetStringUTFChars(value, nullptr);
+    if (data == nullptr) {
+        return -1;
+    }
+    ssize_t written = ::pwrite(fd, data, strlen(data), offset);
+    int error = written < 0 ? errno : 0;
+    env->ReleaseStringUTFChars(value, data);
+    return error;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_dev_forgemirror_demo_MainActivity_nativeProbeClose(
+        JNIEnv* env,
+        jobject /* this */,
+        jint fd) {
+    (void) env;
+    return close(fd) == 0 ? 0 : errno;
+}
+
+extern "C" JNIEXPORT jint JNICALL
 Java_dev_forgemirror_demo_MainActivity_nativeProbeDupWrite(
         JNIEnv* env,
         jobject /* this */,

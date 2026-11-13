@@ -62,6 +62,7 @@ public class MainActivity extends AppCompatActivity {
         String javaMmap = HarnessStorage.readRandomText(this);
         int dupWriteErr = nativeProbeDupWrite(probeFile, "D2XYZ6");
         String javaDup = HarnessStorage.readRandomText(this);
+        startMergeProbe();
         nativeProbeHoldWrite(probeFile, "P2XYZ6", 5000);
         try {
             Thread.sleep(3000);
@@ -80,6 +81,43 @@ public class MainActivity extends AppCompatActivity {
                 + " dupErr=" + dupWriteErr + " javaDup=" + javaDup;
         tv.setText(stringFromJNI() + "\n" + appStatus + "\n" + providerStatus
                 + "\n" + HarnessStorage.verify(this) + "\n" + probe);
+    }
+
+    private void startMergeProbe() {
+        try {
+            try (dev.forgemirror.shield.ShieldRandomAccess random =
+                         ShieldStorageFacade.openRandomAccessFile(
+                                 this, "merge_probe.txt", "rw")) {
+                random.seek(0);
+                byte[] seed = new byte[200000];
+                for (int index = 0; index < seed.length; index++) {
+                    seed[index] = (byte) ('A' + (index % 26));
+                }
+                random.write(seed);
+            }
+            final int fd = nativeProbeOpenMerge(
+                    getFilesDir() + "/merge_probe.txt");
+            if (fd < 0) {
+                Log.w(TAG, "merge probe openErr=" + fd);
+                return;
+            }
+            final int writeErr = nativeProbePwrite(fd, 0, "MAIN");
+            Log.i(TAG, "merge probe ready");
+            new Thread(() -> {
+                try {
+                    Thread.sleep(4000);
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                }
+                int closeErr = nativeProbeClose(fd);
+                String result = "writeErr=" + writeErr + " closeErr=" + closeErr
+                        + " " + HarnessStorage.readMergeProbe(this);
+                Log.i(TAG, "merge probe result " + result);
+                runOnUiThread(() -> binding.sampleText.append("\nmerge " + result));
+            }, "merge-probe").start();
+        } catch (Exception error) {
+            Log.w(TAG, "merge probe failed: " + error);
+        }
     }
 
     @Override
@@ -106,7 +144,8 @@ public class MainActivity extends AppCompatActivity {
             new Thread(() -> HarnessStorage.holdLockFor(
                     this, "harness_lock.txt", 2000), "harness-lock").start();
             startService(new Intent(this, HarnessRemoteService.class)
-                    .putExtra("lock_probe", true));
+                    .putExtra("lock_probe", true)
+                    .putExtra("merge_probe", true));
         } catch (IllegalStateException error) {
             Log.w(TAG, "service start not allowed in current state", error);
         }
@@ -131,4 +170,10 @@ public class MainActivity extends AppCompatActivity {
     public native int nativeProbeHoldWrite(String path, String value, int millis);
 
     public native int nativeProbeDupWrite(String path, String value);
+
+    public native int nativeProbeOpenMerge(String path);
+
+    public native int nativeProbePwrite(int fd, int offset, String value);
+
+    public native int nativeProbeClose(int fd);
 }

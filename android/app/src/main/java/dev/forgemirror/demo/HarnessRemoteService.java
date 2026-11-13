@@ -17,6 +17,17 @@ public final class HarnessRemoteService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.i(TAG, "onStartCommand pid=" + Process.myPid());
+        if (intent != null && intent.getBooleanExtra("merge_probe", false)) {
+            try (dev.forgemirror.shield.ShieldRandomAccess random =
+                         ShieldStorageFacade.openRandomAccessFile(
+                                 this, "merge_probe.txt", "rw")) {
+                random.seek(65536);
+                random.write("REMOTE".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                Log.i(TAG, "merge probe wrote remote pid=" + Process.myPid());
+            } catch (Exception error) {
+                Log.w(TAG, "merge probe failed: " + error);
+            }
+        }
         if (intent != null && intent.getBooleanExtra("lock_probe", false)) {
             long start = android.os.SystemClock.elapsedRealtime();
             try (dev.forgemirror.shield.ShieldRandomAccess random =

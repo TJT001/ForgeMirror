@@ -956,6 +956,159 @@ final class ShieldChunkStore implements AutoCloseable {
         }
     }
 
+    int chunkSize() {
+        return chunkSize;
+    }
+
+    byte[] fileIdCopy() {
+        return Arrays.copyOf(fileId, 16);
+    }
+
+    static byte[] fileIdOf(File target, byte[] key) {
+        try (ShieldChunkStore store = new ShieldChunkStore(target, key, "r", false)) {
+            return store.fileIdCopy();
+        } catch (IOException | RuntimeException error) {
+            return null;
+        }
+    }
+
+    byte[] readAllBytes() throws IOException {
+        ensureOpen();
+        if (length > MAX_LENGTH) {
+            throw new IOException("file too large");
+        }
+        byte[] data = new byte[(int) length];
+        int offset = 0;
+        while (offset < data.length) {
+            int read = read(offset, data, offset, data.length - offset);
+            if (read < 0) {
+                break;
+            }
+            offset += read;
+        }
+        return data;
+    }
+
+    static byte[][] chunkHashes(byte[] data, int chunkSize) {
+        int count = chunksFor(data.length, chunkSize);
+        byte[][] hashes = new byte[count][];
+        for (int index = 0; index < count; index++) {
+            int offset = index * chunkSize;
+            hashes[index] = hashChunk(data, offset,
+                    Math.min(chunkSize, data.length - offset), chunkSize);
+        }
+        return hashes;
+    }
+
+    private static byte[] hashChunk(byte[] data, int offset, int length,
+                                    int chunkSize) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            digest.update(data, offset, length);
+            if (length < chunkSize) {
+                byte[] padding = new byte[chunkSize - length];
+                digest.update(padding);
+            }
+            return digest.digest();
+        } catch (Exception error) {
+            throw new IllegalStateException("SHA-256 unavailable", error);
+        }
+    }
+
+    static final class MergeResult {
+        final boolean merged;
+        final int conflicts;
+        final int written;
+
+        MergeResult(boolean merged, int conflicts, int written) {
+            this.merged = merged;
+            this.conflicts = conflicts;
+            this.written = written;
+        }
+    }
+
+    static MergeResult writeMerged(File target, byte[] key, byte[] plaintext,
+                                   byte[] baselineFileId, int baselineChunkSize,
+                                   int baselineLength, byte[][] baselineHashes)
+            throws IOException {
+        if (plaintext.length > MAX_LENGTH || baselineFileId == null
+                || baselineHashes == null || baselineChunkSize <= 0
+                || !target.isFile() || !matches(target)) {
+            writeAll(target, key, plaintext);
+            return new MergeResult(false, 0, 0);
+        }
+        try (ShieldChunkStore store =
+                     new ShieldChunkStore(target, key, "rw", false)) {
+            if (store.chunkSize != baselineChunkSize
+                    || !Arrays.equals(store.fileId, baselineFileId)) {
+                store.replaceAll(plaintext);
+                return new MergeResult(false, 1, 0);
+            }
+            return store.merge(plaintext, baselineLength, baselineHashes);
+        } catch (IOException | RuntimeException error) {
+            writeAll(target, key, plaintext);
+            return new MergeResult(false, 0, 0);
+        }
+    }
+
+    private MergeResult merge(byte[] plaintext, int baselineLength,
+                              byte[][] baselineHashes) throws IOException {
+        long targetLength = length;
+        int targetCount = chunksFor(targetLength, chunkSize);
+        int localCount = chunksFor(plaintext.length, chunkSize);
+        boolean localLengthChanged = plaintext.length != baselineLength;
+        boolean remoteLengthChanged = targetLength != baselineLength;
+        int conflicts = 0;
+        List<Integer> writes = new ArrayList<>();
+        byte[] targetChunk = new byte[chunkSize];
+        for (int index = 0; index < localCount; index++) {
+            int offset = index * chunkSize;
+            int localLength = Math.min(chunkSize, plaintext.length - offset);
+            byte[] localHash = hashChunk(plaintext, offset, localLength, chunkSize);
+            byte[] baseHash = index < baselineHashes.length
+                    ? baselineHashes[index] : null;
+            if (baseHash != null && Arrays.equals(localHash, baseHash)) {
+                continue;
+            }
+            boolean remoteChanged = false;
+            if (index < targetCount) {
+                int targetRemaining = (int) (targetLength - offset);
+                int targetLen = Math.min(chunkSize, targetRemaining);
+                Arrays.fill(targetChunk, (byte) 0);
+                int read = read(offset, targetChunk, 0, targetLen);
+                if (read < 0) {
+                    Arrays.fill(targetChunk, (byte) 0);
+                }
+                byte[] targetHash = hashChunk(targetChunk, 0, targetLen, chunkSize);
+                remoteChanged = baseHash == null
+                        || !Arrays.equals(targetHash, baseHash);
+            } else if (!localLengthChanged) {
+                // Remote truncated a region this writer did not resize.
+                conflicts++;
+                continue;
+            }
+            if (remoteChanged) {
+                conflicts++;
+            }
+            writes.add(index);
+        }
+        if (localLengthChanged) {
+            if (remoteLengthChanged && targetLength != plaintext.length) {
+                conflicts++;
+            }
+            setLength(plaintext.length);
+        }
+        int written = 0;
+        for (int index : writes) {
+            int offset = index * chunkSize;
+            int localLength = Math.min(chunkSize, plaintext.length - offset);
+            write(offset, plaintext, offset, localLength);
+            written++;
+        }
+        changed = written > 0 || (localLengthChanged && targetLength != plaintext.length);
+        return new MergeResult(true, conflicts, written);
+    }
+
     private void readHeader() throws IOException {        if (source.length() < HEADER_SIZE) {
             throw new IOException("truncated FMF2 header");
         }
