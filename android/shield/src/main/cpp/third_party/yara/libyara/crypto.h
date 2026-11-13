@@ -142,6 +142,49 @@ typedef CC_SHA256_CTX yr_sha256_ctx;
 #define yr_sha256_update(ctx, data, len) CC_SHA256_Update(ctx, data, len)
 #define yr_sha256_final(digest, ctx)     CC_SHA256_Final(digest, ctx)
 
+#else
+
+#include <stddef.h>
+#include <stdint.h>
+
+typedef struct {
+  uint32_t state[4];
+  uint64_t count;
+  uint8_t buffer[64];
+} yr_md5_ctx;
+
+typedef struct {
+  uint32_t state[5];
+  uint64_t count;
+  uint8_t buffer[64];
+} yr_sha1_ctx;
+
+typedef struct {
+  uint32_t state[8];
+  uint64_t count;
+  uint8_t buffer[64];
+} yr_sha256_ctx;
+
+void yr_md5_fallback_init(yr_md5_ctx *ctx);
+void yr_md5_fallback_update(yr_md5_ctx *ctx, const void *data, size_t length);
+void yr_md5_fallback_final(uint8_t digest[16], yr_md5_ctx *ctx);
+void yr_sha1_fallback_init(yr_sha1_ctx *ctx);
+void yr_sha1_fallback_update(yr_sha1_ctx *ctx, const void *data, size_t length);
+void yr_sha1_fallback_final(uint8_t digest[20], yr_sha1_ctx *ctx);
+void yr_sha256_fallback_init(yr_sha256_ctx *ctx);
+void yr_sha256_fallback_update(yr_sha256_ctx *ctx, const void *data, size_t length);
+void yr_sha256_fallback_final(uint8_t digest[32], yr_sha256_ctx *ctx);
+
+#define yr_md5_init(ctx) yr_md5_fallback_init(ctx)
+#define yr_md5_update(ctx, data, len) yr_md5_fallback_update(ctx, data, len)
+#define yr_md5_final(digest, ctx) yr_md5_fallback_final(digest, ctx)
+#define yr_sha1_init(ctx) yr_sha1_fallback_init(ctx)
+#define yr_sha1_update(ctx, data, len) yr_sha1_fallback_update(ctx, data, len)
+#define yr_sha1_final(digest, ctx) yr_sha1_fallback_final(digest, ctx)
+#define yr_sha256_init(ctx) yr_sha256_fallback_init(ctx)
+#define yr_sha256_update(ctx, data, len) yr_sha256_fallback_update(ctx, data, len)
+#define yr_sha256_final(digest, ctx) yr_sha256_fallback_final(digest, ctx)
+
 #endif
 
 #endif

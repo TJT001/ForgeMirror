@@ -67,6 +67,22 @@ final class ShieldRuleUpdater {
         safe.put("detection", json.optBoolean("detection", true));
         String response = json.optString("response", "toast");
         safe.put("response", "log".equals(response) ? "log" : "toast");
+        JSONObject policies = new JSONObject();
+        JSONObject incoming = json.optJSONObject("policies");
+        if (incoming != null) {
+            java.util.Iterator<String> keys = incoming.keys();
+            while (keys.hasNext()) {
+                String rule = keys.next();
+                if (!knownRule(rule)) {
+                    continue;
+                }
+                String mode = incoming.optString(rule, "");
+                if ("log".equals(mode) || "toast".equals(mode)) {
+                    policies.put(rule, mode);
+                }
+            }
+        }
+        safe.put("policies", policies);
         ShieldServerConfig.store(context, safe);
         Log.i(TAG, "server config applied response=" + safe.optString("response"));
     }
@@ -93,6 +109,23 @@ final class ShieldRuleUpdater {
             Log.i(TAG, "remote rules stored version=" + parsed.version);
         } finally {
             parsed.close();
+        }
+    }
+
+    private static boolean knownRule(String rule) {
+        switch (rule) {
+            case "env_frida":
+            case "env_xposed":
+            case "env_injection":
+            case "env_unpacker":
+            case "env_hook":
+            case "env_debugger":
+            case "env_root":
+            case "env_emulator":
+            case "file_tamper":
+                return true;
+            default:
+                return false;
         }
     }
 

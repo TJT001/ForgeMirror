@@ -30,6 +30,17 @@ final class ShieldServerConfig {
         return fallback;
     }
 
+    static String responseFor(Context context, String ruleId, String fallback) {
+        JSONObject policies = read(context).optJSONObject("policies");
+        if (policies != null && ruleId != null) {
+            String value = policies.optString(ruleId, "");
+            if ("log".equals(value) || "toast".equals(value)) {
+                return value;
+            }
+        }
+        return response(context, fallback);
+    }
+
     static void store(Context context, JSONObject config) {
         try {
             File file = new File(context.getFilesDir(), FILE);

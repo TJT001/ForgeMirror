@@ -10,7 +10,7 @@ import typer
 from .intake import PROFILES, SIGNING_MODES, run_intake
 from .inventory import run_inventory
 from .gate import run_gate
-from .formats.legacy import parse_classes_dve, parse_edata
+from .formats.legacy import decode_res_rule, edata_to_policy, parse_classes_dve, parse_edata
 from .formats.file import (
     DEFAULT_CHUNK_SIZE,
     FileFormatError,
@@ -227,8 +227,9 @@ def migrate_file(
 def legacy_inspect(
     edata: Path | None = typer.Option(None, "--edata", exists=True, dir_okay=False),
     dve: Path | None = typer.Option(None, "--dve", exists=True, dir_okay=False),
+    res_rule: Path | None = typer.Option(None, "--res-rule", exists=True, dir_okay=False),
 ) -> None:
-    """Inspect a SecNeo .edata policy or classes.dve stamp."""
+    """Inspect SecNeo .edata, classes.dve, or RES_RULE material."""
     result: dict = {"ok": True}
     if edata is not None:
         parsed = parse_edata(edata.read_text())
@@ -240,10 +241,26 @@ def legacy_inspect(
     if dve is not None:
         stamp = parse_classes_dve(dve.read_bytes())
         result["classes_dve"] = {"md5": stamp.md5, "ctime": stamp.ctime}
-    if edata is None and dve is None:
+    if res_rule is not None:
+        result["res_rule"] = decode_res_rule(res_rule.read_bytes())
+    if edata is None and dve is None and res_rule is None:
         typer.echo("need --edata or --dve", err=True)
         raise typer.Exit(2)
     _echo(result)
+
+
+@app.command("edata-to-policy")
+def edata_to_policy_command(
+    edata: Path = typer.Option(..., "--edata", exists=True, dir_okay=False),
+    out: Path = typer.Option(..., "--out", dir_okay=False),
+) -> None:
+    """Convert a SecNeo .edata policy into a ForgeMirror policy JSON."""
+    parsed = parse_edata(edata.read_text())
+    policy = edata_to_policy(parsed)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(policy, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
+    _echo({"ok": True, "out": str(out), "rules": len(parsed.rules),
+           "excludes": len(parsed.excludes), "enc_type": parsed.enc_type})
 
 
 @app.command("yara-check")

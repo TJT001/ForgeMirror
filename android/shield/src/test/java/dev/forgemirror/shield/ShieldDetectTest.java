@@ -18,12 +18,31 @@ public final class ShieldDetectTest {
                 "7f0000 r-xp 00000000 fd:00 1 /data/local/tmp/youpk.so"));
         assertEquals("env_hook", ShieldDetect.classifyMapsLine(
                 "7f0000 r-xp 00000000 fd:00 1 /data/local/tmp/libbhook.so"));
+        assertEquals("env_xposed", ShieldDetect.classifyMapsLine(
+                "7f0000 r-xp 00000000 fd:00 1 /data/adb/modules/dexposed/lib.so"));
+        assertEquals("env_injection", ShieldDetect.classifyMapsLine(
+                "7f0000 r-xp 00000000 fd:00 1 /data/adb/modules/adbi/lib.so"));
+        assertEquals("env_unpacker", ShieldDetect.classifyMapsLine(
+                "7f0000 r-xp 00000000 fd:00 1 /data/local/tmp/fupk3.so"));
         assertNull(ShieldDetect.classifyMapsLine(
                 "7f0000 r-xp 00000000 fd:00 1 /data/app/libshield_hook.so"));
         assertNull(ShieldDetect.classifyMapsLine(
                 "7f0000 r-xp 00000000 fd:00 1 /data/app/com.example/libc++_shared.so"));
         assertNull(ShieldDetect.classifyMapsLine(
                 "7f0000 r-xp 00000000 fd:00 1 /system/lib64/libc.so"));
+    }
+
+    @Test
+    public void pathAndPortClassification() {
+        assertEquals("env_frida", ShieldDetect.classifyKnownPath(
+                "/data/local/tmp/frida-server"));
+        assertEquals("env_injection", ShieldDetect.classifyKnownPath(
+                "/data/adb/modules/zygisk_zygisk"));
+        assertNull(ShieldDetect.classifyKnownPath("/data/local/tmp/demo"));
+        assertEquals("env_frida", ShieldDetect.classifyTcpLine(
+                "0: 0100007F:69A2 00000000:0000 0A 00000000:00000000 00:00000000 00000000"));
+        assertNull(ShieldDetect.classifyTcpLine(
+                "1: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000"));
     }
 
     @Test

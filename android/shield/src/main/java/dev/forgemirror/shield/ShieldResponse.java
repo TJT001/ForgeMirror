@@ -24,20 +24,24 @@ final class ShieldResponse {
         if (findings.isEmpty()) {
             return;
         }
-        Set<String> kinds = new LinkedHashSet<>();
-        StringBuilder detail = new StringBuilder();
+        Set<String> toastKinds = new LinkedHashSet<>();
         for (ShieldDetect.Finding finding : findings) {
-            if (!kinds.add(finding.kind)) {
-                continue;
+            String selected = ShieldServerConfig.responseFor(
+                    context, finding.ruleId, mode);
+            Log.w(TAG, "response rule=" + finding.ruleId + " mode=" + selected);
+            if ("toast".equals(selected)) {
+                toastKinds.add(finding.kind);
             }
+        }
+        if (toastKinds.isEmpty()) {
+            return;
+        }
+        StringBuilder detail = new StringBuilder();
+        for (String kind : toastKinds) {
             if (detail.length() > 0) {
                 detail.append(", ");
             }
-            detail.append(finding.kind);
-        }
-        Log.w(TAG, "response mode=" + mode + " kinds=" + detail);
-        if (!"toast".equals(mode)) {
-            return;
+            detail.append(kind);
         }
         String text = "ForgeMirror 检测到运行环境异常：" + detail;
         Context appContext = context.getApplicationContext();

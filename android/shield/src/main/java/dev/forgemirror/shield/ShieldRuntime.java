@@ -102,6 +102,7 @@ public final class ShieldRuntime {
                 }
                 rules = ShieldRules.load(context, config, key);
                 ShieldEvents.init(context, config, fileKey);
+                ShieldDetectionBridge.register(context);
                 ShieldDetect.start(context, config);
                 ShieldRuleUpdater.start(context, config, key);
                 ShieldFileWatch.start(context, config);

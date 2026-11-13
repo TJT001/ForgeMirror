@@ -28,6 +28,7 @@ final class ShieldDetect {
     private static final String TAG = "ShieldDetect";
     private static final long MAX_MAPS_BYTES = 8L << 20;
     private static final AtomicBoolean STARTED = new AtomicBoolean();
+    private static final AtomicBoolean DEBUGGER_REPORTED = new AtomicBoolean();
 
     private ShieldDetect() {
     }
@@ -50,9 +51,6 @@ final class ShieldDetect {
         if (!STARTED.compareAndSet(false, true)) {
             return;
         }
-        if (!ShieldProcess.isMain(context)) {
-            return;
-        }
         if (!ShieldServerConfig.detectionEnabled(context, config.detection)) {
             Log.i(TAG, "detection disabled");
             return;
@@ -61,6 +59,10 @@ final class ShieldDetect {
             List<Finding> findings = scan(context);
             if (findings.isEmpty()) {
                 Log.i(TAG, "no runtime findings");
+                return;
+            }
+            if (!ShieldProcess.isMain(context)) {
+                ShieldDetectionBridge.send(context, findings);
                 return;
             }
             for (Finding finding : findings) {
@@ -76,6 +78,14 @@ final class ShieldDetect {
             }
             ShieldResponse.dispatch(context, findings,
                     ShieldServerConfig.response(context, config.response));
+            for (Finding finding : findings) {
+                if ("env_debugger".equals(finding.ruleId)) {
+                    DEBUGGER_REPORTED.set(true);
+                }
+            }
+            if (ShieldProcess.isMain(context)) {
+                startDebuggerWatchdog(context, config);
+            }
         }, "shield-detect");
         thread.setDaemon(true);
         thread.start();
@@ -90,6 +100,9 @@ final class ShieldDetect {
         scanRoot(findings, seen);
         scanEmulator(findings, seen);
         scanXposedClass(findings, seen);
+        scanKnownPaths(findings, seen);
+        scanFridaPorts(findings, seen);
+        scanFridaProcesses(findings, seen);
         return findings;
     }
 
@@ -99,23 +112,26 @@ final class ShieldDetect {
         }
         String lower = line.toLowerCase(Locale.US);
         if (lower.contains("libshield") || lower.contains("libshadowhook")
-                || lower.contains("libyara") || lower.contains("forgemirror")) {
+                || lower.contains("shadowhook") || lower.contains("libyara")
+                || lower.contains("forgemirror")) {
             return null;
         }
         if (containsAny(lower, "frida", "gum-js", "frida-gadget", "linjector")) {
             return "env_frida";
         }
-        if (containsAny(lower, "xposed", "lsposed", "edxposed")) {
+        if (containsAny(lower, "xposed", "lsposed", "edxposed", "dexposed")) {
             return "env_xposed";
         }
-        if (containsAny(lower, "zygisk", "riru", "magisk", "substrate")) {
+        if (containsAny(lower, "zygisk", "riru", "magisk", "substrate",
+                "adbi", "ddi", "taichi", "roothide")) {
             return "env_injection";
         }
-        if (containsAny(lower, "youpk", "fupk", "fart", "dumpdex", "yarfahook")) {
+        if (containsAny(lower, "youpk", "fupk", "fart", "dumpdex", "yarfahook",
+                "dumpartmethod", "dumpdexfilebyartmethod")) {
             return "env_unpacker";
         }
-        if (containsAny(lower, "libhook", "inlinehook", "bhook", "dobby")
-                && !lower.contains("libc++")) {
+        if (containsAny(lower, "libhook", "inlinehook", "bhook", "dobby",
+                "shadowhook") && !lower.contains("libc++")) {
             return "env_hook";
         }
         return null;
@@ -176,6 +192,152 @@ final class ShieldDetect {
             return "env_emulator";
         }
         return null;
+    }
+
+    static String classifyKnownPath(String path) {
+        if (path == null) {
+            return null;
+        }
+        String lower = path.toLowerCase(Locale.US);
+        if (lower.contains("frida-server") || lower.contains("frida-server-")) {
+            return "env_frida";
+        }
+        if (lower.contains("/zygisk") || lower.contains("zygisk_")
+                || lower.contains("/riru") || lower.contains("/system/bin/.ext")
+                || lower.contains("/data/local/xbin") || lower.contains("/system/sd/xbin")) {
+            return "env_injection";
+        }
+        if (lower.contains("youpk") || lower.contains("fupk") || lower.contains("fart")) {
+            return "env_unpacker";
+        }
+        return null;
+    }
+
+    static String classifyTcpLine(String line) {
+        if (line == null || line.startsWith("sl")) {
+            return null;
+        }
+        String[] fields = line.trim().split("\\s+");
+        if (fields.length < 2 || !fields[1].contains(":")) {
+            return null;
+        }
+        String local = fields[1];
+        String port = local.substring(local.lastIndexOf(':') + 1).toLowerCase(Locale.US);
+        if ("69a2".equals(port) || "69a3".equals(port)) {
+            return "env_frida";
+        }
+        return null;
+    }
+
+    private static void scanKnownPaths(List<Finding> findings, Set<String> seen) {
+        String[] paths = {
+                "/data/local/tmp/frida-server",
+                "/data/local/tmp/frida-server-16",
+                "/data/local/tmp/frida-server-17",
+                "/data/adb/modules/zygisk",
+                "/data/adb/modules/zygisk_zygisk",
+                "/data/adb/modules/riru",
+                "/system/bin/.ext",
+                "/data/local/xbin",
+                "/system/sd/xbin",
+                "/data/local/bin",
+        };
+        for (String path : paths) {
+            String rule = classifyKnownPath(path);
+            if (rule != null && new File(path).exists()) {
+                add(findings, seen, rule, kindForRule(rule), path,
+                        confidenceForRule(rule));
+            }
+        }
+    }
+
+    private static void scanFridaPorts(List<Finding> findings, Set<String> seen) {
+        String[] files = {"/proc/net/tcp", "/proc/net/tcp6"};
+        for (String name : files) {
+            File file = new File(name);
+            if (!file.isFile()) {
+                continue;
+            }
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                    new FileInputStream(file), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (classifyTcpLine(line) != null) {
+                        add(findings, seen, "env_frida", "frida",
+                                name + ":27042/27043", 0.7);
+                        break;
+                    }
+                }
+            } catch (Exception ignored) {
+                // Not readable.
+            }
+        }
+    }
+
+    private static void scanFridaProcesses(List<Finding> findings, Set<String> seen) {
+        File proc = new File("/proc");
+        File[] entries = proc.listFiles();
+        if (entries == null) {
+            return;
+        }
+        int visited = 0;
+        for (File entry : entries) {
+            if (visited++ > 256) {
+                break;
+            }
+            String name = entry.getName();
+            if (!name.matches("\\d+")) {
+                continue;
+            }
+            File cmdline = new File(entry, "cmdline");
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                    new FileInputStream(cmdline), StandardCharsets.UTF_8))) {
+                String command = reader.readLine();
+                if (command != null && command.toLowerCase(Locale.US).contains("frida")) {
+                    add(findings, seen, "env_frida", "frida",
+                            "process:" + command.trim(), 0.8);
+                }
+            } catch (Exception ignored) {
+                // Permission denied for other UIDs.
+            }
+        }
+    }
+
+    private static void startDebuggerWatchdog(Context context, ShieldConfig config) {
+        Thread thread = new Thread(() -> {
+            while (true) {
+                try {
+                    Thread.sleep(3000);
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                boolean attached = Debug.isDebuggerConnected() || Debug.waitingForDebugger();
+                int tracer = tracerPid();
+                if (!attached && tracer <= 0) {
+                    continue;
+                }
+                if (!DEBUGGER_REPORTED.compareAndSet(false, true)) {
+                    continue;
+                }
+                List<Finding> findings = new ArrayList<>();
+                findings.add(new Finding("env_debugger", "debugger",
+                        attached ? "DebuggerConnected" : "TracerPid>0", 0.9));
+                try {
+                    JSONObject payload = new JSONObject();
+                    payload.put("kind", "debugger");
+                    payload.put("evidence", findings.get(0).evidence);
+                    ShieldEvents.record("runtime_detection", "env_debugger", 0.9,
+                            sha256(findings.get(0).evidence), payload);
+                } catch (Exception error) {
+                    Log.w(TAG, "watchdog record failed: " + error);
+                }
+                ShieldResponse.dispatch(context, findings,
+                        ShieldServerConfig.response(context, config.response));
+            }
+        }, "shield-debug-watch");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private static void scanMaps(List<Finding> findings, Set<String> seen) {
@@ -332,6 +494,10 @@ final class ShieldDetect {
 
     private static String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    static String hash(String value) {
+        return sha256(value);
     }
 
     private static String sha256(String value) {

@@ -192,6 +192,10 @@ final class ShieldRules {
                         || !entry.getName().endsWith(".so")) {
                     continue;
                 }
+                String entryName = entry.getName();
+                if (entryName.contains("/libshield") || entryName.contains("/libshadowhook")) {
+                    continue;
+                }
                 byte[] data = read(archive.getInputStream(entry),
                         Math.min(entry.getSize(), budget));
                 budget -= data.length;

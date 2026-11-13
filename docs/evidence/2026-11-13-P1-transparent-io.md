@@ -81,3 +81,46 @@ Go build / vet         通过
 7. 签名重验依赖 PackageManager，root/框架层伪造仍有边界；无 so 内存自校验。
 8. 壳自身未实现双 `PT_DYNAMIC`/`DT_INIT` 自解密/字符串加密/系统调用桩——这是参考壳的架构，ForgeMirror 采用 FDX2 + 标准 linker，未按该路线重写。
 9. `.edata`/`classes.dve` 只做检查，不自动应用 RC4 密钥；密钥需显式传入，未内置第三方壳常量。
+
+## P1 增补（2026-11-13 继续）
+
+### 检测深度
+
+- maps/线程特征扩展到 `dexposed`、`adbi`、`ddi`、`taichi`、`roothide`、`fupk3`、
+  `dumpArtMethod`、`dumpDexFileByArtMethod`、`shadowhook`。
+- 已知路径：`/data/local/tmp/frida-server*`、`/data/adb/modules/zygisk*`、`/riru*`、
+  `/system/bin/.ext`、`/data/local/xbin`、`/system/sd/xbin`、`/data/local/bin`。
+- `/proc/net/tcp`、`tcp6` 的 27042/27043 端口；`/proc/<pid>/cmdline` 的 frida 进程（权限允许时）。
+- 调试器 watchdog：每 3 秒检查 `Debug.isDebuggerConnected`/`TracerPid`，首次命中上报一次。
+- 排除壳自身 `libshield*`、`libshadowhook*`、YARA 扫描中的壳 so，避免自报。
+
+### 响应分级
+
+- 服务端 `client_config.policies`（JSONB）支持按 ruleId 指定 `log`/`toast`，迁移 `0005_client_policies.sql`。
+- 客户端 `ShieldResponse` 按 `ruleId` 选择响应；未配置时回退全局 `response`。
+- 设备：`file_tamper` 策略 `log` 时仅记录事件，不弹 Toast；`env_frida` 可单独设为 `toast`。
+- 仍无 kill/exit/block；这是需求约束，不是遗漏。
+
+### 多进程
+
+- 新增 `ShieldDetectionBridge`：远端进程命中后通过包内广播送到主进程，由主进程记录事件并按策略响应。
+- 主进程动态注册 `RECEIVER_NOT_EXPORTED`（API 33+）接收；主进程自身检测仍直接处理。
+
+### YARA 模块
+
+- 内置 MD5/SHA1/SHA256 fallback，启用 YARA `elf` 与 `hash` 模块；ELF 模块依赖的 TLSH 源码一并编入。
+- host 侧校验：MD5/SHA1/SHA256 空串与 `abc` 向量全部匹配标准值。
+- 扫描壳自身 so 时跳过 `libshield*`/`libshadowhook*`，避免九条规则误报。
+
+### 兼容工具
+
+- `edata-to-policy`：`.edata` → ForgeMirror policy JSON（rules/excludes/enc_type 报告）。
+- `legacy-inspect --res-rule`：`KEY_RES_ENC` 重复 XOR 解码 + 长度/count/rules 最佳努力解析。
+- 测试：Python 61 项；Shield JVM 17 项（Detect 4 / ChunkStore 9 / Policy 4）。
+
+### 增补限制
+
+- 多进程广播依赖包内动态接收器；主进程未启动时远端命中可能丢失。
+- 端口/进程扫描受 Android 10+ `/proc` 权限限制，`/proc/net/tcp` 在部分 ROM 被 SELinux 拒绝。
+- 响应仍只有 log/toast；block/degrade 未定义安全动作。
+- YARA `pe` 模块仍因 crypto/PE 依赖未启用；`hash` 模块仅内置三种哈希。

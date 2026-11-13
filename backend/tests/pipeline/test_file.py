@@ -153,3 +153,29 @@ class LegacyMetadataTests(unittest.TestCase):
         stamp = parse_classes_dve(blob)
         self.assertEqual(stamp.md5, bytes(range(16)).hex())
         self.assertEqual(stamp.ctime, 123456)
+
+    def test_edata_to_policy(self) -> None:
+        from forgemirror.formats.legacy import edata_to_policy, parse_edata
+
+        policy = edata_to_policy(parse_edata(
+            "enc_type/0\nshared_prefs/*.xml\n!databases/a.db\n"))
+        self.assertEqual(policy["schema"], "forgemirror.policy/1")
+        self.assertEqual(policy["rules"][0]["pattern"], "shared_prefs/*.xml")
+        self.assertEqual(policy["excludes"][0]["pattern"], "databases/a.db")
+
+    def test_decode_res_rule(self) -> None:
+        from forgemirror.formats.legacy import decode_res_rule
+
+        rules = b"shared_prefs/*.xml\ndatabases/*.db"
+        struct = bytearray(0x20 + len(rules))
+        struct[0x0C:0x10] = len(rules).to_bytes(4, "little")
+        struct[0x10:0x14] = (0x20).to_bytes(4, "little")
+        struct[0x18:0x1C] = (1).to_bytes(4, "little")
+        struct[0x1C:0x20] = (2).to_bytes(4, "little")
+        struct[0x20:] = rules
+        key = b"KEY_RES_ENC"
+        encrypted = bytes(value ^ key[index % len(key)]
+                          for index, value in enumerate(struct))
+        decoded = decode_res_rule(encrypted)
+        self.assertEqual(decoded["count"], 2)
+        self.assertEqual(decoded["rules"], rules.decode())

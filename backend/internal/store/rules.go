@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -48,32 +49,52 @@ func (s *Store) LatestRulePackage(ctx context.Context, appPackage string) (*Rule
 }
 
 type ClientConfig struct {
-	AppPackage string `json:"app_package"`
-	Detection  bool   `json:"detection"`
-	Response   string `json:"response"`
+	AppPackage string            `json:"app_package"`
+	Detection  bool              `json:"detection"`
+	Response   string            `json:"response"`
+	Policies   map[string]string `json:"policies"`
 }
 
 func (s *Store) GetClientConfig(ctx context.Context, appPackage string) (ClientConfig, error) {
-	config := ClientConfig{AppPackage: appPackage, Detection: true, Response: "toast"}
+	config := ClientConfig{
+		AppPackage: appPackage,
+		Detection:  true,
+		Response:   "toast",
+		Policies:   map[string]string{},
+	}
+	var raw []byte
 	err := s.pool.QueryRow(ctx, `
-		SELECT detection, response FROM client_config WHERE app_package = $1`,
-		appPackage).Scan(&config.Detection, &config.Response)
+		SELECT detection, response, policies FROM client_config WHERE app_package = $1`,
+		appPackage).Scan(&config.Detection, &config.Response, &raw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return config, nil
 	}
 	if err != nil {
 		return ClientConfig{}, err
 	}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &config.Policies); err != nil {
+			config.Policies = map[string]string{}
+		}
+	}
 	return config, nil
 }
 
 func (s *Store) SetClientConfig(ctx context.Context, config ClientConfig) error {
-	_, err := s.pool.Exec(ctx, `
-		INSERT INTO client_config (app_package, detection, response)
-		VALUES ($1, $2, $3)
+	policies := config.Policies
+	if policies == nil {
+		policies = map[string]string{}
+	}
+	raw, err := json.Marshal(policies)
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, `
+		INSERT INTO client_config (app_package, detection, response, policies)
+		VALUES ($1, $2, $3, $4::jsonb)
 		ON CONFLICT (app_package) DO UPDATE
 		SET detection = EXCLUDED.detection, response = EXCLUDED.response,
-		    updated_at = now()`,
-		config.AppPackage, config.Detection, config.Response)
+		    policies = EXCLUDED.policies, updated_at = now()`,
+		config.AppPackage, config.Detection, config.Response, raw)
 	return err
 }

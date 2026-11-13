@@ -507,15 +507,17 @@ func (s *Server) getClientConfig(c *gin.Context) {
 		"app_package":  config.AppPackage,
 		"detection":    config.Detection,
 		"response":     config.Response,
+		"policies":     config.Policies,
 		"rule_version": ruleVersion,
 	})
 }
 
 func (s *Server) setClientConfig(c *gin.Context) {
 	var request struct {
-		AppPackage string `json:"app_package"`
-		Detection  bool   `json:"detection"`
-		Response   string `json:"response"`
+		AppPackage string            `json:"app_package"`
+		Detection  bool              `json:"detection"`
+		Response   string            `json:"response"`
+		Policies   map[string]string `json:"policies"`
 	}
 	if err := c.ShouldBindJSON(&request); err != nil || request.AppPackage == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "app_package required"})
@@ -525,16 +527,40 @@ func (s *Server) setClientConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "response must be log or toast"})
 		return
 	}
+	if request.Policies == nil {
+		request.Policies = map[string]string{}
+	}
+	for rule, response := range request.Policies {
+		if !knownDetectionRule(rule) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unknown detection rule: " + rule})
+			return
+		}
+		if response != "log" && response != "toast" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "policy response must be log or toast"})
+			return
+		}
+	}
 	config := store.ClientConfig{
 		AppPackage: request.AppPackage,
 		Detection:  request.Detection,
 		Response:   request.Response,
+		Policies:   request.Policies,
 	}
 	if err := s.store.SetClientConfig(c.Request.Context(), config); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, config)
+}
+
+func knownDetectionRule(rule string) bool {
+	switch rule {
+	case "env_frida", "env_xposed", "env_injection", "env_unpacker",
+		"env_hook", "env_debugger", "env_root", "env_emulator", "file_tamper":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) publishRulePackage(c *gin.Context) {

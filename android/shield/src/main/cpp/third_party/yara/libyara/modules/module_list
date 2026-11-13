@@ -7,3 +7,11 @@ MODULE(string)
 #ifdef DEX_MODULE
 MODULE(dex)
 #endif
+
+#ifdef ELF_MODULE
+MODULE(elf)
+#endif
+
+#ifdef HASH_MODULE
+MODULE(hash)
+#endif

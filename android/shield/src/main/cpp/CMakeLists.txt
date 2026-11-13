@@ -8,22 +8,25 @@ add_library(shield_core SHARED core.cpp)
 add_library(shield_boot SHARED boot.cpp)
 add_library(abi_compile_check OBJECT abi_compile_check.c)
 
-file(GLOB YARA_CORE_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/yara/libyara/*.c)
+file(GLOB YARA_CORE_SOURCES CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/yara/libyara/*.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/yara/libyara/tlshc/*.c)
 list(APPEND YARA_CORE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/yara/libyara/proc/none.c)
-file(GLOB YARA_MODULE_SOURCES
+file(GLOB YARA_MODULE_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/yara/libyara/modules/tests/*.c
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/yara/libyara/modules/math/*.c
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/yara/libyara/modules/time/*.c
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/yara/libyara/modules/console/*.c
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/yara/libyara/modules/string/*.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/yara/libyara/modules/dex/*.c)
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/yara/libyara/modules/dex/*.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/yara/libyara/modules/elf/*.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/yara/libyara/modules/hash/*.c)
 add_library(yara STATIC ${YARA_CORE_SOURCES} ${YARA_MODULE_SOURCES})
 target_include_directories(yara
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/yara/libyara/include
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/yara/libyara)
-target_compile_definitions(yara PRIVATE DEX_MODULE USE_NO_PROC)
+target_compile_definitions(yara PRIVATE DEX_MODULE ELF_MODULE HASH_MODULE USE_NO_PROC BUCKETS_256 CHECKSUM_3B)
 target_compile_options(yara PRIVATE -w)
 
 add_library(shield_yara SHARED yara_jni.cpp)
