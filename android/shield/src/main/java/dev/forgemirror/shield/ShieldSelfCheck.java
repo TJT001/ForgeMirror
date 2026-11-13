@@ -1,6 +1,7 @@
 package dev.forgemirror.shield;
 
 import android.content.Context;
+import android.os.Build;
 import android.util.Log;
 
 import org.json.JSONObject;
@@ -8,11 +9,16 @@ import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 /** Verifies that shell native libraries are mapped from the installed APK. */
 final class ShieldSelfCheck {
@@ -43,6 +49,7 @@ final class ShieldSelfCheck {
         }
         boolean apkMapped = false;
         int shellLibs = 0;
+        List<String> mappedShellFiles = new ArrayList<>();
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(
                 new FileInputStream(maps), StandardCharsets.UTF_8))) {
             String line;
@@ -62,6 +69,9 @@ final class ShieldSelfCheck {
                     report(context, config, "untrusted:" + path);
                     return;
                 }
+                if (!path.contains("base.apk!") && new File(path).isFile()) {
+                    mappedShellFiles.add(path);
+                }
             }
         } catch (Exception error) {
             Log.w(TAG, "self check failed: " + error);
@@ -71,7 +81,62 @@ final class ShieldSelfCheck {
             report(context, config, "apkMapped=false");
             return;
         }
+        if (!mappedShellFiles.isEmpty()) {
+            String abi = Build.SUPPORTED_ABIS.length > 0
+                    ? Build.SUPPORTED_ABIS[0] : "arm64-v8a";
+            try (ZipFile apk = new ZipFile(sourceDir)) {
+                for (String path : mappedShellFiles) {
+                    String name = new File(path).getName();
+                    ZipEntry entry = apk.getEntry("lib/" + abi + "/" + name);
+                    if (entry == null) {
+                        report(context, config, "missing_apk_entry:" + name);
+                        return;
+                    }
+                    String diskHash = fileHash(new File(path));
+                    String apkHash = entryHash(apk, entry);
+                    if (!diskHash.equals(apkHash)) {
+                        report(context, config, "so_hash:" + name);
+                        return;
+                    }
+                }
+            } catch (Exception error) {
+                report(context, config, "so_hash_failed:" + error);
+                return;
+            }
+        }
         Log.i(TAG, "self check ok shellLibs=" + shellLibs);
+    }
+
+    private static String fileHash(File file) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        try (InputStream input = new FileInputStream(file)) {
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                digest.update(buffer, 0, read);
+            }
+        }
+        return hex(digest.digest());
+    }
+
+    private static String entryHash(ZipFile apk, ZipEntry entry) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        try (InputStream input = apk.getInputStream(entry)) {
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                digest.update(buffer, 0, read);
+            }
+        }
+        return hex(digest.digest());
+    }
+
+    private static String hex(byte[] value) {
+        StringBuilder builder = new StringBuilder(value.length * 2);
+        for (byte item : value) {
+            builder.append(String.format(Locale.US, "%02x", item & 0xff));
+        }
+        return builder.toString();
     }
 
     static boolean isTrustedPath(String path, String sourceDir, String nativeDir) {

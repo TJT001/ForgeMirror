@@ -183,3 +183,14 @@ ShieldDetectionBridge: registered
   ShieldResponse: response rule=file_tamper mode=degrade
   ShieldHook: block-mode=1
   ```
+
+### so 哈希自检与 x86 shell（本轮）
+
+- `ShieldSelfCheck` 对 maps 中**真实文件路径**的 `libshield*`/`libshadowhook*` 计算
+  SHA-256，并与 APK 的 `lib/<abi>/<name>` 条目哈希比较；不一致上报 `file_tamper/self_check`。
+  APK-backed（`base.apk`）映射已由清单产物哈希覆盖，跳过。
+- 路径特征 `/zygisk`、`/riru`、`frida-server`、`youpk` 等也改为 XOR+hex 编码。
+- `shield` 模块 ABI 扩展到 x86/x86_64：这些 ABI 构建 `libshield_boot/core/yara`，
+  Java 层文件保护、YARA、事件、检测均可用；ShadowHook 仅 ARM，因此 x86 没有原生 I/O hook，
+  透明 memfd/native block 在 x86 上不可用（Java facade 仍工作）。
+- ARM 设备回归：`self check ok shellLibs=0`、`YARA rules compiled`、探针全 0。

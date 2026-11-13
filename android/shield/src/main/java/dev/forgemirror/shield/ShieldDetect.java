@@ -33,6 +33,9 @@ final class ShieldDetect {
     private static final String[] UNPACKER = decode("2318e1c1a5e16e50323476ffd7a184074e3209f1fadea0ff6b4e3e0fe7cbafb2911d502403fbc9b79692794d3e1cf4a7ae9269515a3e00f3dba3896b5f221209f7d2a099614f");
     private static final String[] HOOK = decode("361ef6d9a184632f2b3110f0d8b69862452c6ee3f6d4b79e184b230be4dacaae9276503e19e3c7aa89");
     private static final String[] THREAD = decode("3d02f99ca49825492d300c93d1be9164444d14eef1d7f59360462808");
+    private static final String[] PATH_FRIDA = decode("3c05fdd5afc67b40302919ebbcb582644e2649f2fbc9ae906002");
+    private static final String[] PATH_INJECTION = decode("750dedd6a798632f38261bf0c5b8af0705350df3ebb1f7866b5c380ceb8ca2b494381a3416ffa2ea869e6858791fffceab8b2b595c32169f9dbc957a52260d52e9d3fb896c4226");
+    private static final String[] PATH_UNPACKER = decode("2318e1c1a5e16e50323476ffd7a184");
     private static final String[] BUILD = decode("3d12fad4bc826b2f273209f5d7a79f7f203400eac1dca89d7d412963e1ccafba96726b220ae0a2b3809064333116fed4a7887048513572f2dda3886f4f300877e8d6ba92665e");
     private static final AtomicBoolean STARTED = new AtomicBoolean();
     private static final AtomicBoolean DEBUGGER_REPORTED = new AtomicBoolean();
@@ -202,15 +205,13 @@ final class ShieldDetect {
             return null;
         }
         String lower = path.toLowerCase(Locale.US);
-        if (lower.contains("frida-server") || lower.contains("frida-server-")) {
+        if (containsAny(lower, PATH_FRIDA)) {
             return "env_frida";
         }
-        if (lower.contains("/zygisk") || lower.contains("zygisk_")
-                || lower.contains("/riru") || lower.contains("/system/bin/.ext")
-                || lower.contains("/data/local/xbin") || lower.contains("/system/sd/xbin")) {
+        if (containsAny(lower, PATH_INJECTION)) {
             return "env_injection";
         }
-        if (lower.contains("youpk") || lower.contains("fupk") || lower.contains("fart")) {
+        if (containsAny(lower, PATH_UNPACKER)) {
             return "env_unpacker";
         }
         return null;
