@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -88,14 +89,24 @@ def heartbeat(conn: psycopg.Connection, task: dict) -> bool:
 def run_pipeline(task: dict) -> tuple[bool, str | None, str | None, dict]:
     work_dir = DATA_DIR / "works" / str(task["id"])
     work_dir.mkdir(parents=True, exist_ok=True)
+    shield_aar = os.environ.get(
+        "SHIELD_AAR",
+        str(ROOT / "android" / "shield" / "build" / "outputs" / "aar" / "shield-debug.aar"),
+    )
     command = [
-        sys.executable, "-m", "forgemirror.cli", "build",
+        sys.executable, "-m", "forgemirror.cli", "protect",
         "--apk", task["source_path"],
         "--out", str(work_dir),
         "--profile", task["profile"],
         "--signing-mode", task["signing_mode"],
         "--build-id", str(task["id"]),
+        "--shield-aar", shield_aar,
     ]
+    auth_url = os.environ.get("AUTH_URL", "")
+    if auth_url:
+        command.extend(["--auth-url", auth_url])
+    if os.environ.get("NO_KEY_ASSET", "").lower() in ("1", "true", "yes"):
+        command.append("--no-key-asset")
     env = dict(os.environ)
     env["PYTHONPATH"] = str(PIPELINE)
     process = subprocess.Popen(
@@ -117,19 +128,33 @@ def run_pipeline(task: dict) -> tuple[bool, str | None, str | None, dict]:
     stdout, stderr = process.communicate()
 
     summary: dict = {}
-    meta_path = work_dir / "build.meta.json"
-    if meta_path.is_file():
+    protected = work_dir / "protected.apk"
+    protect_meta_path = work_dir / "protected.protect.json"
+    if protect_meta_path.is_file():
         try:
-            meta = json.loads(meta_path.read_text())
-            summary = meta.get("app", {})
-            summary["container"] = str(work_dir / "container.fdx")
-            summary["sha256"] = meta.get("hashes", {}).get("container")
+            meta = json.loads(protect_meta_path.read_text())
+            summary = {
+                "package": meta.get("package"),
+                "version_code": meta.get("version_code"),
+                "result": str(protected),
+                "sha256": hashlib.sha256(protected.read_bytes()).hexdigest()
+                if protected.is_file() else None,
+            }
         except Exception:
             summary = {}
-    if process.returncode != 0 or not (work_dir / "container.fdx").is_file():
-        reason = "E_PIPELINE"
+
+    gate_path = work_dir / "gate.json"
+    gate_passed = False
+    if gate_path.is_file():
+        try:
+            gate_passed = bool(json.loads(gate_path.read_text()).get("passed"))
+        except Exception:
+            gate_passed = False
+
+    if process.returncode != 0 or not protected.is_file() or not gate_passed:
+        reason = "E_GATE" if gate_path.is_file() and not gate_passed else "E_PIPELINE"
         intake_path = work_dir / "intake.json"
-        if intake_path.is_file():
+        if reason == "E_PIPELINE" and intake_path.is_file():
             try:
                 codes = json.loads(intake_path.read_text()).get("reason_codes") or []
                 if codes:
@@ -153,13 +178,13 @@ def main() -> None:
             print(f"claimed {task['id']} attempt={task['attempt']}", flush=True)
             add_event(conn, task, 1, stage="queue", status="running", progress=5,
                       message="claimed by worker")
-            add_event(conn, task, 2, stage="s0-s2", status="running", progress=40,
-                      message="running pipeline")
+            add_event(conn, task, 2, stage="s0-s8", status="running", progress=40,
+                      message="running protect pipeline")
 
             ok, reason, detail, summary = run_pipeline(task)
             if ok:
                 add_event(conn, task, 3, stage="done", status="succeeded", progress=100,
-                          message=f"container {summary.get('sha256')}")
+                          message=f"protected apk {summary.get('sha256')}")
                 conn.execute(
                     """
                     UPDATE tasks
@@ -168,7 +193,7 @@ def main() -> None:
                         lease_owner = NULL, lease_expires_at = NULL, updated_at = now()
                     WHERE id = %s AND lease_owner = %s
                     """,
-                    (summary.get("container"), summary.get("package"),
+                    (summary.get("result"), summary.get("package"),
                      summary.get("version_code"), task["id"], WORKER_ID),
                 )
                 print(f"succeeded {task['id']}", flush=True)

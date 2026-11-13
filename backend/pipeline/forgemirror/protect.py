@@ -1,0 +1,234 @@
+"""Generic S6: turn an arbitrary APK into a protected APK without a custom
+build variant. Rewrites the binary manifest, swaps business DEX for the stub,
+injects encrypted assets, signs the manifest, aligns, and signs the package.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import tempfile
+import uuid
+import zipfile
+from dataclasses import dataclass
+from pathlib import Path
+
+from .formats import axml
+from .formats.container import open_container
+from .formats.policy import pack_policy
+from .s6 import (
+    build_envelope,
+    collect_artifacts,
+    inject,
+    load_or_create_key,
+    parse_signer,
+    public_der,
+    sha256_bytes,
+)
+from .tools import AndroidTools
+
+DEX_RE = re.compile(r"^classes\d*\.dex$")
+
+DEFAULT_POLICY = {
+    "schema": "forgemirror.policy/1",
+    "version": 1,
+    "min_shell_version": "0.1.0",
+    "rules": [
+        {"pattern": "shared_prefs/*.xml", "action": "encrypt"},
+        {"pattern": "files/**/*.txt", "action": "encrypt"},
+    ],
+    "excludes": [
+        {"pattern": "databases/*"},
+        {"pattern": "cache/**"},
+    ],
+}
+
+
+@dataclass
+class ProtectOptions:
+    apk: Path
+    container: Path
+    key_file: Path
+    out: Path
+    build_id: str
+    aar: Path
+    profile: str = "basic"
+    signing_mode: str = "customer_local"
+    auth_url: str = ""
+    no_key_asset: bool = False
+    key_dir: Path = Path("artifacts/keys")
+    alg: str = "ecdsa-p256-sha256"
+
+
+def _stub_from_aar(aar: Path, tools: AndroidTools, tmp: Path) -> tuple[bytes, dict[str, bytes]]:
+    with zipfile.ZipFile(aar) as archive:
+        classes_jar = tmp / "classes.jar"
+        classes_jar.write_bytes(archive.read("classes.jar"))
+        libs: dict[str, bytes] = {}
+        for name in archive.namelist():
+            if not name.startswith("jni/") or not name.endswith(".so"):
+                continue
+            parts = name.split("/")
+            if len(parts) < 3:
+                continue
+            libs[f"lib/{parts[1]}/{parts[2]}"] = archive.read(name)
+    if not libs:
+        raise SystemExit(f"shield AAR has no native libs: {aar}")
+    stub = tools.dex_jar(classes_jar, tmp / "stub").read_bytes()
+    return stub, libs
+
+
+def _rewrite_zip(source: Path, target: Path, entries: dict[str, bytes]) -> None:
+    with zipfile.ZipFile(source) as src, zipfile.ZipFile(
+        target, "w", compression=zipfile.ZIP_DEFLATED
+    ) as dst:
+        for info in src.infolist():
+            if DEX_RE.match(info.filename):
+                continue
+            if info.filename in entries:
+                continue
+            dst.writestr(info, src.read(info.filename))
+        for name, data in entries.items():
+            stored = name.startswith("lib/") and name.endswith(".so")
+            info = zipfile.ZipInfo(name)
+            info.compress_type = zipfile.ZIP_STORED if stored else zipfile.ZIP_DEFLATED
+            info.external_attr = 0o644 << 16
+            dst.writestr(info, data)
+
+
+def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
+    if not options.aar.is_file():
+        raise SystemExit(f"shield AAR not found: {options.aar}")
+    k_content = options.key_file.read_bytes()
+    container = options.container.read_bytes()
+    opened = open_container(container, k_content=k_content)
+    if not container.startswith(b"FDX2"):
+        raise SystemExit("container does not start with FDX2")
+
+    with zipfile.ZipFile(options.apk) as archive:
+        original_manifest = archive.read("AndroidManifest.xml")
+    document = axml.parse(original_manifest)
+    package = document.package_name()
+    if not package:
+        raise SystemExit("APK manifest has no package name")
+    original_application, original_factory = document.application_names()
+    version_code = document.manifest_version_code() or 0
+
+    cleartext = options.auth_url.startswith("http://")
+    document.rewrite_application(
+        "dev.forgemirror.shield.ShieldApplication",
+        "dev.forgemirror.shield.ShieldAppComponentFactory",
+        cleartext=cleartext,
+    )
+    document.inject_child("application", "provider", [
+        ("name", "dev.forgemirror.shield.ShieldProvider"),
+        ("authorities", f"{package}.shield.bootstrap"),
+        ("exported", False),
+    ])
+    document.inject_child("application", "activity", [
+        ("name", "dev.forgemirror.shield.ShieldRecoveryActivity"),
+        ("exported", False),
+    ])
+    rewritten_manifest = axml.serialize(document)
+
+    cert = tools.cert_sha256(options.apk) or ""
+    signing_key = load_or_create_key(options.key_dir, options.alg)
+    der = public_der(signing_key)
+    policy_alg = "ecdsa-p256-sha256-raw" if options.alg == "ecdsa-p256-sha256" else options.alg
+
+    options.out.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="fm-protect-") as tmp:
+        tmp = Path(tmp)
+        stub_dex, shield_libs = _stub_from_aar(options.aar, tools, tmp)
+
+        config = {
+            "schema": "forgemirror.shield.config/1",
+            "original_application": original_application or "",
+            "original_factory": original_factory or "",
+            "shell_version": "0.1.0",
+            "container": "container.fdx",
+            "manifest": "shield/manifest.sig",
+            "trusted_key": "shield/trusted_key.der",
+            "key": "" if options.no_key_asset else "shield/k_content.bin",
+            "policy": "shield/policy.pkg",
+            "build_id": options.build_id,
+            "auth_url": options.auth_url,
+        }
+        policy_pkg = pack_policy(
+            DEFAULT_POLICY,
+            k_content=k_content,
+            build_id=uuid.UUID(options.build_id).bytes,
+            private_key=signing_key,
+            alg=policy_alg,
+        )
+
+        entries = {
+            "AndroidManifest.xml": rewritten_manifest,
+            "classes.dex": stub_dex,
+            "assets/container.fdx": container,
+            "assets/shield/config.json": json.dumps(
+                config, indent=2, sort_keys=True
+            ).encode("utf-8"),
+            "assets/shield/policy.pkg": policy_pkg,
+            "assets/shield/trusted_key.der": der,
+        }
+        if not options.no_key_asset:
+            entries["assets/shield/k_content.bin"] = k_content
+        entries.update(shield_libs)
+
+        injected = tmp / "injected.apk"
+        _rewrite_zip(options.apk, injected, entries)
+
+        fixed = {
+            "classes.dex",
+            "assets/container.fdx",
+            "assets/shield/config.json",
+            "assets/shield/policy.pkg",
+            "assets/shield/trusted_key.der",
+        }
+        if not options.no_key_asset:
+            fixed.add("assets/shield/k_content.bin")
+        artifacts = collect_artifacts(injected, fixed, all_libs=True)
+
+        payload = {
+            "schema": "forgemirror.manifest/1",
+            "build_id": options.build_id,
+            "shell_version": "0.1.0",
+            "policy_version": 0,
+            "rule_version": 0,
+            "app": {
+                "package": package,
+                "version_code": version_code,
+                "cert_sha256": cert,
+            },
+            "artifacts": artifacts,
+        }
+        envelope = build_envelope(payload, signing_key, options.alg)
+
+        with_manifest = tmp / "manifest.apk"
+        inject(injected, with_manifest, {"assets/shield/manifest.sig": envelope})
+        aligned = tmp / "aligned.apk"
+        tools.align_apk(with_manifest, aligned)
+        tools.sign_debug(aligned, options.out)
+
+    verify_output = tools.verify(options.out)
+    meta = {
+        "ok": True,
+        "apk": str(options.out),
+        "package": package,
+        "version_code": version_code,
+        "original_application": original_application,
+        "original_factory": original_factory,
+        "dex_count": len(opened.files),
+        "container_sha256": sha256_bytes(container),
+        "stub_dex_bytes": len(stub_dex),
+        "artifact_count": len(artifacts),
+        "auth_url": options.auth_url or None,
+        "key_embedded": not options.no_key_asset,
+        "algorithm": options.alg,
+        "signer_sha256": parse_signer(verify_output),
+    }
+    options.out.with_suffix(".protect.json").write_text(
+        json.dumps(meta, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    )
+    return meta

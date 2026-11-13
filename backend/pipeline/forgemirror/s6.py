@@ -34,18 +34,25 @@ def inject(source: Path, target: Path, entries: dict[str, bytes]) -> None:
             dst.writestr(name, data)
 
 
-def collect_artifacts(apk: Path, fixed: set[str]) -> list[dict]:
+def collect_artifacts(apk: Path, fixed: set[str], all_libs: bool = False) -> list[dict]:
     with zipfile.ZipFile(apk) as archive:
         names = set(archive.namelist())
         missing = fixed - names
         if missing:
             raise SystemExit(f"missing injected artifacts: {sorted(missing)}")
-        libs = {
-            name
-            for name in names
-            if name.startswith("lib/")
-            and (name.endswith("/libshield_boot.so") or name.endswith("/libshield_core.so"))
-        }
+        if all_libs:
+            libs = {
+                name
+                for name in names
+                if name.startswith("lib/") and name.endswith(".so")
+            }
+        else:
+            libs = {
+                name
+                for name in names
+                if name.startswith("lib/")
+                and (name.endswith("/libshield_boot.so") or name.endswith("/libshield_core.so"))
+            }
         artifacts = []
         for path in sorted(fixed | libs):
             info = archive.getinfo(path)

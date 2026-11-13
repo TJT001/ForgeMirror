@@ -9,8 +9,12 @@ import typer
 
 from .intake import PROFILES, SIGNING_MODES, run_intake
 from .inventory import run_inventory
+from .gate import run_gate
 from .pipeline import BuildOptions, run_build
+from .protect import ProtectOptions, protect
 from .tools import AndroidTools, ToolError
+
+ROOT = Path(__file__).resolve().parents[3]
 
 app = typer.Typer(help="ForgeMirror build pipeline", no_args_is_help=True)
 
@@ -77,6 +81,78 @@ def build(
     )
     _echo(result)
     if not result["ok"]:
+        raise typer.Exit(1)
+
+
+@app.command("protect")
+def protect_apk(
+    apk: Path = typer.Option(..., "--apk", exists=True, dir_okay=False, readable=True),
+    out: Path | None = typer.Option(None, "--out", "-o", help="output directory"),
+    profile: str = typer.Option("basic", "--profile"),
+    signing_mode: str = typer.Option("customer_local", "--signing-mode"),
+    build_id: str | None = typer.Option(None, "--build-id"),
+    shield_aar: Path = typer.Option(
+        ROOT / "android" / "shield" / "build" / "outputs" / "aar" / "shield-debug.aar",
+        "--shield-aar",
+    ),
+    auth_url: str = typer.Option("", "--auth-url"),
+    no_key_asset: bool = typer.Option(False, "--no-key-asset"),
+    key_dir: Path = typer.Option(Path("artifacts/keys"), "--key-dir"),
+    alg: str = typer.Option("ecdsa-p256-sha256", "--alg"),
+    shell_version: str = typer.Option("0.1.0", "--shell-version"),
+    sdk_root: Path | None = typer.Option(None, "--sdk-root"),
+    build_tools: str | None = typer.Option(None, "--build-tools"),
+) -> None:
+    """Run S0-S2, rewrite the manifest (S6), align/sign (S7), and gate (S8)."""
+    if profile not in PROFILES:
+        typer.echo(f"invalid profile: {profile}", err=True)
+        raise typer.Exit(2)
+    if signing_mode not in SIGNING_MODES:
+        typer.echo(f"invalid signing mode: {signing_mode}", err=True)
+        raise typer.Exit(2)
+
+    tools = _discover(sdk_root, build_tools)
+    build_result = run_build(
+        BuildOptions(
+            apk=apk,
+            out=out,
+            profile=profile,
+            signing_mode=signing_mode,
+            build_id=build_id,
+            shell_version=shell_version,
+        ),
+        tools,
+    )
+    if not build_result["ok"]:
+        _echo(build_result)
+        raise typer.Exit(1)
+
+    work_dir = Path(build_result["out"])
+    container = work_dir / "container.fdx"
+    key_file = work_dir / "keys" / "k_content.bin"
+    result = protect(
+        ProtectOptions(
+            apk=apk,
+            container=container,
+            key_file=key_file,
+            out=work_dir / "protected.apk",
+            build_id=build_result["build_id"],
+            aar=shield_aar,
+            profile=profile,
+            signing_mode=signing_mode,
+            auth_url=auth_url,
+            no_key_asset=no_key_asset,
+            key_dir=key_dir,
+            alg=alg,
+        ),
+        tools,
+    )
+    gate = run_gate(work_dir / "protected.apk", container, key_file.read_bytes())
+    (work_dir / "gate.json").write_text(
+        json.dumps(gate, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    )
+    _echo({**result, "gate": gate})
+    if not gate["passed"]:
         raise typer.Exit(1)
 
 
