@@ -70,9 +70,16 @@ public final class ShieldRuntime {
             // P1-B uses a local developer key path; key service is P2.
             state = STATE_KEY_READY;
 
-            if (config.key != null && !config.key.isEmpty()) {
+            if ((config.key != null && !config.key.isEmpty())
+                    || (config.authUrl != null && !config.authUrl.isEmpty())) {
                 long started = SystemClock.elapsedRealtimeNanos();
-                byte[] key = ShieldAssets.read(context, config.key);
+                byte[] key;
+                if (config.key != null && !config.key.isEmpty()) {
+                    key = ShieldAssets.read(context, config.key);
+                } else {
+                    key = ShieldAuthClient.fetchContentKey(context, config);
+                    Log.i(TAG, "content key obtained from dev authorization");
+                }
                 try {
                     policy = ShieldPolicy.load(context, config, key);
                 } catch (Exception error) {

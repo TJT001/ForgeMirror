@@ -3,6 +3,7 @@ package api
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 
+	"forgemirror/backend/internal/auth"
 	"forgemirror/backend/internal/config"
 	"forgemirror/backend/internal/store"
 )
@@ -23,10 +25,11 @@ import (
 type Server struct {
 	cfg   config.Config
 	store *store.Store
+	auth  *auth.Service
 }
 
-func New(cfg config.Config, st *store.Store) *Server {
-	return &Server{cfg: cfg, store: st}
+func New(cfg config.Config, st *store.Store, authService *auth.Service) *Server {
+	return &Server{cfg: cfg, store: st, auth: authService}
 }
 
 func (s *Server) Router() *gin.Engine {
@@ -44,6 +47,11 @@ func (s *Server) Router() *gin.Engine {
 	api.GET("/tasks/:id/events", s.taskEvents)
 	api.GET("/tasks/:id/artifact", s.taskArtifact)
 	api.POST("/tasks/:id/cancel", s.cancelTask)
+
+	api.POST("/auth/devices", s.registerDevice)
+	api.POST("/auth/grants", s.createGrant)
+	api.GET("/auth/grants/:id", s.getGrantStatus)
+	api.POST("/auth/grants/:id/revoke", s.revokeGrant)
 
 	worker := api.Group("/worker", s.workerAuth)
 	worker.POST("/claim", s.claimTask)
@@ -207,6 +215,95 @@ func (s *Server) cancelTask(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"task": task})
+}
+
+func (s *Server) registerDevice(c *gin.Context) {
+	var request struct {
+		DeviceID  string `json:"device_id"`
+		PublicKey string `json:"public_key"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || request.DeviceID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "device_id and public_key required"})
+		return
+	}
+	publicKey, err := base64.StdEncoding.DecodeString(request.PublicKey)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "public_key must be base64 DER"})
+		return
+	}
+	challenge, err := s.auth.RegisterDevice(c.Request.Context(), request.DeviceID, publicKey)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{
+		"device_id":    challenge.DeviceID,
+		"challenge_id": challenge.ID,
+		"nonce":        base64.StdEncoding.EncodeToString(challenge.Nonce),
+		"expires_at":   challenge.ExpiresAt,
+	})
+}
+
+func (s *Server) createGrant(c *gin.Context) {
+	var request struct {
+		DeviceID    string `json:"device_id"`
+		ChallengeID string `json:"challenge_id"`
+		TaskID      string `json:"task_id"`
+		Signature   string `json:"signature"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	signature, err := base64.StdEncoding.DecodeString(request.Signature)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "signature must be base64"})
+		return
+	}
+	grant, err := s.auth.CreateGrant(c.Request.Context(), request.DeviceID,
+		request.ChallengeID, request.TaskID, signature)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{
+		"grant_id":    grant.ID,
+		"task_id":     grant.TaskID,
+		"expires_at":  grant.ExpiresAt,
+		"wrapped_key": base64.StdEncoding.EncodeToString(grant.WrappedKey),
+		"algorithm":   "rsa-oaep-sha256",
+	})
+}
+
+func (s *Server) getGrantStatus(c *gin.Context) {
+	grant, err := s.auth.GetGrant(c.Request.Context(), c.Param("id"))
+	if err == pgx.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "grant not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"grant_id":   grant.ID,
+		"device_id":  grant.DeviceID,
+		"task_id":    grant.TaskID,
+		"expires_at": grant.ExpiresAt,
+		"revoked":    grant.Revoked,
+	})
+}
+
+func (s *Server) revokeGrant(c *gin.Context) {
+	if err := s.auth.RevokeGrant(c.Request.Context(), c.Param("id")); err != nil {
+		if err == pgx.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{"error": "grant not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"revoked": true})
 }
 
 func (s *Server) workerAuth(c *gin.Context) {

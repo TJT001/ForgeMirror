@@ -5,6 +5,7 @@
     <application
         android:name="dev.forgemirror.shield.ShieldApplication"
         android:appComponentFactory="dev.forgemirror.shield.ShieldAppComponentFactory"
+        android:usesCleartextTraffic="true"
         tools:replace="android:name,android:appComponentFactory">
 
         <provider

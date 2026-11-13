@@ -98,6 +98,16 @@ def main() -> None:
     )
     parser.add_argument("--key-dir", type=Path, default=Path("artifacts/keys"))
     parser.add_argument(
+        "--no-key-asset",
+        action="store_true",
+        help="do not embed k_content.bin; fetch the key via dev authorization",
+    )
+    parser.add_argument(
+        "--auth-url",
+        default="",
+        help="dev authorization base URL written into shield config",
+    )
+    parser.add_argument(
         "--extra-dex",
         type=Path,
         action="append",
@@ -167,9 +177,10 @@ def main() -> None:
         with zipfile.ZipFile(args.apk) as archive:
             config = json.loads(archive.read("assets/shield/config.json"))
         config["container"] = "container.fdx"
-        config["key"] = "shield/k_content.bin"
+        config["key"] = "" if args.no_key_asset else "shield/k_content.bin"
         config["policy"] = "shield/policy.pkg"
         config["build_id"] = args.build_id
+        config["auth_url"] = args.auth_url
         build_id_bytes = uuid.UUID(args.build_id).bytes
         policy_alg = "ecdsa-p256-sha256-raw" if args.alg == "ecdsa-p256-sha256" else args.alg
         policy_pkg = pack_policy(
@@ -180,30 +191,30 @@ def main() -> None:
             alg=policy_alg,
         )
 
+        entries = {
+            "classes.dex": stub_dex,
+            "assets/container.fdx": container,
+            "assets/shield/config.json": json.dumps(
+                config, indent=2, sort_keys=True
+            ).encode("utf-8"),
+            "assets/shield/policy.pkg": policy_pkg,
+            "assets/shield/trusted_key.der": der,
+        }
+        if not args.no_key_asset:
+            entries["assets/shield/k_content.bin"] = k_content
+
         injected = tmp / "injected.apk"
-        build_without_dex(
-            args.apk,
-            injected,
-            {
-                "classes.dex": stub_dex,
-                "assets/container.fdx": container,
-                "assets/shield/config.json": json.dumps(
-                    config, indent=2, sort_keys=True
-                ).encode("utf-8"),
-                "assets/shield/k_content.bin": k_content,
-                "assets/shield/policy.pkg": policy_pkg,
-                "assets/shield/trusted_key.der": der,
-            },
-        )
+        build_without_dex(args.apk, injected, entries)
 
         fixed = {
             "classes.dex",
             "assets/container.fdx",
             "assets/shield/config.json",
-            "assets/shield/k_content.bin",
             "assets/shield/policy.pkg",
             "assets/shield/trusted_key.der",
         }
+        if not args.no_key_asset:
+            fixed.add("assets/shield/k_content.bin")
         payload = {
             "schema": "forgemirror.manifest/1",
             "build_id": args.build_id,
@@ -242,6 +253,8 @@ def main() -> None:
                 "stub_dex_bytes": len(stub_dex),
                 "artifact_count": len(payload["artifacts"]),
                 "algorithm": args.alg,
+                "auth_url": args.auth_url or None,
+                "key_embedded": not args.no_key_asset,
                 "signer_sha256": parse_signer(verify_output),
                 "manifest": str(payload_path),
             },

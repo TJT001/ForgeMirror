@@ -21,6 +21,7 @@ public final class ShieldApplication extends Application {
     @Override
     protected void attachBaseContext(Context base) {
         super.attachBaseContext(base);
+        installEarlyApplication();
         int state = ShieldRuntime.bootstrap(this);
         Log.i(TAG, "attachBaseContext state=" + state);
 
@@ -31,6 +32,23 @@ public final class ShieldApplication extends Application {
             ShieldInstrumentation.install();
         }
         attachOriginal(base);
+    }
+
+    /** Keystore access needs ActivityThread.currentApplication() during attach. */
+    private void installEarlyApplication() {
+        try {
+            Class<?> threadClass = Class.forName("android.app.ActivityThread");
+            java.lang.reflect.Method current =
+                    threadClass.getDeclaredMethod("currentActivityThread");
+            current.setAccessible(true);
+            Object thread = current.invoke(null);
+            java.lang.reflect.Field field =
+                    threadClass.getDeclaredField("mInitialApplication");
+            field.setAccessible(true);
+            field.set(thread, this);
+        } catch (Throwable error) {
+            Log.w(TAG, "early application install failed", error);
+        }
     }
 
     private void attachOriginal(Context base) {

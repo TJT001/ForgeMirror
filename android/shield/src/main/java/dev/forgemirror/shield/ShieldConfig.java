@@ -14,6 +14,7 @@ final class ShieldConfig {
     final String key;
     final String policy;
     final String buildId;
+    final String authUrl;
 
     private ShieldConfig(
             String originalApplication,
@@ -24,7 +25,8 @@ final class ShieldConfig {
             String trustedKey,
             String key,
             String policy,
-            String buildId) {
+            String buildId,
+            String authUrl) {
         this.originalApplication = originalApplication;
         this.originalFactory = originalFactory;
         this.shellVersion = shellVersion;
@@ -34,6 +36,7 @@ final class ShieldConfig {
         this.key = key;
         this.policy = policy;
         this.buildId = buildId;
+        this.authUrl = authUrl;
     }
 
     static ShieldConfig load(Context context) throws Exception {
@@ -47,6 +50,7 @@ final class ShieldConfig {
                 json.optString("trusted_key", "shield/trusted_key.der"),
                 json.optString("key", ""),
                 json.optString("policy", ""),
-                json.optString("build_id", ""));
+                json.optString("build_id", ""),
+                json.optString("auth_url", ""));
     }
 }

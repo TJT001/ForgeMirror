@@ -50,6 +50,76 @@
       "license": "MIT",
       "pinned": false,
       "notes": "Pipeline CLI; lock version before release"
+    },
+    {
+      "id": "GO-GIN",
+      "name": "gin",
+      "version": "1.10.1",
+      "scope": "server",
+      "status": "candidate",
+      "license": "MIT",
+      "pinned": false,
+      "notes": "Go API framework; pin module checksums with go.sum"
+    },
+    {
+      "id": "GO-PGX",
+      "name": "pgx",
+      "version": "5.7.6",
+      "scope": "server",
+      "status": "candidate",
+      "license": "MIT",
+      "pinned": false,
+      "notes": "PostgreSQL driver/pool; pin module checksums with go.sum"
+    },
+    {
+      "id": "GO-X-CRYPTO",
+      "name": "golang.org/x/crypto",
+      "version": "0.37.0",
+      "scope": "server",
+      "status": "candidate",
+      "license": "BSD-3-Clause",
+      "pinned": false,
+      "notes": "Transitive dependency; verify module checksum"
+    },
+    {
+      "id": "PY-PSYCOPG",
+      "name": "psycopg",
+      "version": "3.3.9",
+      "scope": "build",
+      "status": "candidate",
+      "license": "LGPL-3.0 (server/build only; never in client APK)",
+      "pinned": false,
+      "notes": "Worker PostgreSQL driver; license review before distribution"
+    },
+    {
+      "id": "NODE-VUE",
+      "name": "vue",
+      "version": "3.5.45",
+      "scope": "server",
+      "status": "candidate",
+      "license": "MIT",
+      "pinned": false,
+      "notes": "Web UI framework; served separately from the client APK"
+    },
+    {
+      "id": "NODE-ELEMENT-PLUS",
+      "name": "element-plus",
+      "version": "2.14.8",
+      "scope": "server",
+      "status": "candidate",
+      "license": "MIT",
+      "pinned": false,
+      "notes": "Web UI components; served separately from the client APK"
+    },
+    {
+      "id": "NODE-VITE",
+      "name": "vite",
+      "version": "6.4.6",
+      "scope": "build",
+      "status": "candidate",
+      "license": "MIT",
+      "pinned": false,
+      "notes": "Frontend build tool; dev/build only"
     }
   ]
 }

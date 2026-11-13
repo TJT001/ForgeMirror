@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"forgemirror/backend/internal/api"
+	"forgemirror/backend/internal/auth"
 	"forgemirror/backend/internal/config"
 	"forgemirror/backend/internal/store"
 )
@@ -25,7 +26,9 @@ func main() {
 		log.Fatalf("migrate: %v", err)
 	}
 
-	server := api.New(cfg, st)
+	server := api.New(cfg, st, auth.New(st, cfg.DataDir,
+		time.Duration(cfg.ChallengeTTLSec)*time.Second,
+		time.Duration(cfg.GrantTTLSec)*time.Second))
 	log.Printf("forgemirror api listening on :%s", cfg.Port)
 	if err := server.Router().Run(":" + cfg.Port); err != nil {
 		log.Fatalf("http: %v", err)
