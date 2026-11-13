@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.SharedPreferences;
 import android.os.Debug;
+import android.os.ParcelFileDescriptor;
 import android.os.SystemClock;
 import android.util.Log;
 
@@ -74,6 +75,7 @@ public final class ShieldRuntime {
 
             // P1-B uses a local developer key path; key service is P2.
             state = STATE_KEY_READY;
+            byte[] contentKey = null;
 
             if ((config.key != null && !config.key.isEmpty())
                     || (config.authUrl != null && !config.authUrl.isEmpty())) {
@@ -85,6 +87,7 @@ public final class ShieldRuntime {
                     key = ShieldAuthClient.fetchContentKey(context, config);
                     Log.i(TAG, "content key obtained from dev authorization");
                 }
+                contentKey = key;
                 try {
                     policy = ShieldPolicy.load(context, config, key);
                 } catch (Exception error) {
@@ -122,8 +125,27 @@ public final class ShieldRuntime {
                         + " pssKb=" + pssKb() + " " + ShieldArt.describe());
             }
 
-            int status = nativeBootstrap();
-            if (status == FM_RECOVERY_REQUIRED) {
+            ParcelFileDescriptor coreDescriptor = null;
+            if (config.core != null && !config.core.isEmpty() && contentKey != null) {
+                try {
+                    coreDescriptor = ShieldCoreLoader.open(context, config, contentKey);
+                    Log.i(TAG, "encrypted core opened fd=" + coreDescriptor.getFd());
+                } catch (Throwable error) {
+                    Log.w(TAG, "encrypted core unavailable: " + error);
+                }
+            }
+            int status = coreDescriptor != null
+                    ? nativeBootstrapWithCore(coreDescriptor.getFd())
+                    : nativeBootstrap();
+            if (coreDescriptor != null) {
+                try {
+                    coreDescriptor.close();
+                } catch (Exception ignored) {
+                    // The linker has mapped the core by now.
+                }
+            }
+            if (status == FM_RECOVERY_REQUIRED
+                    && (config.core == null || config.core.isEmpty())) {
                 try {
                     System.loadLibrary("shield_core");
                     status = nativeBootstrap();
@@ -263,6 +285,8 @@ public final class ShieldRuntime {
     }
 
     private static native int nativeBootstrap();
+
+    private static native int nativeBootstrapWithCore(int fd);
 
     public static native int abiVersion();
 

@@ -6,12 +6,14 @@ injects encrypted assets, signs the manifest, aligns, and signs the package.
 from __future__ import annotations
 
 import json
+import os
 import re
 import secrets
 import tempfile
 import uuid
 import zipfile
 from dataclasses import dataclass
+from uuid import UUID
 from pathlib import Path
 
 from .apk import elf_arch
@@ -20,6 +22,10 @@ from .formats.container import open_container
 from .formats.policy import pack_policy
 from .formats.rules import pack_rules
 from .formats.yara_rules import RUNTIME_RULES
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
 from .s6 import (
     build_envelope,
     collect_artifacts,
@@ -84,6 +90,7 @@ class ProtectOptions:
     key_dir: Path = Path("artifacts/keys")
     alg: str = "ecdsa-p256-sha256"
     strip_customer_libs: bool = True
+    self_decrypt_core: bool = True
 
 
 def _stub_from_aar(aar: Path, tools: AndroidTools, tmp: Path) -> tuple[bytes, dict[str, bytes]]:
@@ -104,14 +111,16 @@ def _stub_from_aar(aar: Path, tools: AndroidTools, tmp: Path) -> tuple[bytes, di
     return stub, libs
 
 
-def _rewrite_zip(source: Path, target: Path, entries: dict[str, bytes]) -> None:
+def _rewrite_zip(source: Path, target: Path, entries: dict[str, bytes],
+                 drop: set[str] | None = None) -> None:
+    dropped = drop or set()
     with zipfile.ZipFile(source) as src, zipfile.ZipFile(
         target, "w", compression=zipfile.ZIP_DEFLATED
     ) as dst:
         for info in src.infolist():
             if DEX_RE.match(info.filename):
                 continue
-            if info.filename in entries:
+            if info.filename in entries or info.filename in dropped:
                 continue
             dst.writestr(info, src.read(info.filename))
         for name, data in entries.items():
@@ -120,6 +129,22 @@ def _rewrite_zip(source: Path, target: Path, entries: dict[str, bytes]) -> None:
             info.compress_type = zipfile.ZIP_STORED if stored else zipfile.ZIP_DEFLATED
             info.external_attr = 0o644 << 16
             dst.writestr(info, data)
+
+
+def _core_key(k_content: bytes, build_id: str) -> bytes:
+    return HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=UUID(build_id).bytes,
+        info=b"FM/core/v1",
+    ).derive(k_content)
+
+
+def _encrypt_core(data: bytes, key: bytes) -> bytes:
+    magic = b"FMC1"
+    nonce = os.urandom(12)
+    ciphertext = AESGCM(key).encrypt(nonce, data, magic + nonce)
+    return magic + nonce + ciphertext
 
 
 def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
@@ -180,6 +205,21 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
     with tempfile.TemporaryDirectory(prefix="fm-protect-") as tmp:
         tmp = Path(tmp)
         stub_dex, shield_libs = _stub_from_aar(options.aar, tools, tmp)
+        core_libs = {name for name in shield_libs
+                     if name.endswith("/libshield_core.so")}
+        drop_libs: set[str] = set()
+        core_assets: dict[str, bytes] = {}
+        if options.self_decrypt_core:
+            core_key = _core_key(k_content, options.build_id)
+            for name in list(shield_libs):
+                if not name.endswith("/libshield_core.so"):
+                    continue
+                abi = name.split("/")[1]
+                core_assets[f"assets/shield/core/{abi}.enc"] = _encrypt_core(
+                    shield_libs[name], core_key
+                )
+                del shield_libs[name]
+            drop_libs.update(core_libs)
 
         stripped_libs: dict[str, bytes] = {}
         if options.strip_customer_libs:
@@ -216,6 +256,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             "rules_version": 1,
             "cert_sha256": cert,
             "max_native_file_mb": 128,
+            "core": "shield/core" if core_assets else "",
             "app_id": package,
             "build_salt": secrets.token_hex(16),
         }
@@ -249,9 +290,10 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             entries["assets/shield/k_content.bin"] = k_content
         entries.update(stripped_libs)
         entries.update(shield_libs)
+        entries.update(core_assets)
 
         injected = tmp / "injected.apk"
-        _rewrite_zip(options.apk, injected, entries)
+        _rewrite_zip(options.apk, injected, entries, drop_libs)
 
         fixed = {
             "classes.dex",
@@ -261,6 +303,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             "assets/shield/rules.pkr",
             "assets/shield/trusted_key.der",
         }
+        fixed.update(core_assets)
         if not options.no_key_asset:
             fixed.add("assets/shield/k_content.bin")
         artifacts = collect_artifacts(injected, fixed, all_libs=True)

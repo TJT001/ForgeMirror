@@ -107,6 +107,9 @@ def protect_apk(
     event_url: str = typer.Option("", "--event-url"),
     event_token: str = typer.Option("dev-client-token", "--event-token"),
     no_key_asset: bool = typer.Option(False, "--no-key-asset"),
+    self_decrypt_core: bool = typer.Option(
+        True, "--self-decrypt-core/--no-self-decrypt-core"
+    ),
     key_dir: Path = typer.Option(Path("artifacts/keys"), "--key-dir"),
     alg: str = typer.Option("ecdsa-p256-sha256", "--alg"),
     shell_version: str = typer.Option("0.1.0", "--shell-version"),
@@ -155,6 +158,7 @@ def protect_apk(
             event_token=event_token,
             no_key_asset=no_key_asset,
             key_dir=key_dir,
+            self_decrypt_core=self_decrypt_core,
             alg=alg,
         ),
         tools,

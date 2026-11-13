@@ -1,5 +1,7 @@
+#include <android/dlext.h>
 #include <dlfcn.h>
 #include <jni.h>
+#include <unistd.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -17,9 +19,9 @@ struct CoreApi {
     void (*destroy)(fm_core *) = nullptr;
 };
 
-CoreApi load_core() {
+CoreApi resolve_core(void *handle) {
     CoreApi api{};
-    api.handle = dlopen("libshield_core.so", RTLD_NOW | RTLD_LOCAL);
+    api.handle = handle;
     if (api.handle == nullptr) {
         return api;
     }
@@ -37,6 +39,43 @@ CoreApi load_core() {
         api = CoreApi{};
     }
     return api;
+}
+
+CoreApi load_core() {
+    return resolve_core(dlopen("libshield_core.so", RTLD_NOW | RTLD_LOCAL));
+}
+
+CoreApi load_core_fd(int fd) {
+    if (fd < 0) {
+        return CoreApi{};
+    }
+    android_dlextinfo info{};
+    info.flags = ANDROID_DLEXT_USE_LIBRARY_FD;
+    info.library_fd = fd;
+    info.library_fd_offset = 0;
+    return resolve_core(android_dlopen_ext(
+            "libshield_core.so", RTLD_NOW | RTLD_LOCAL, &info));
+}
+
+fm_status boot_with_api(const fm_boot_ctx *ctx, CoreApi api) {
+    (void) ctx;
+    if (api.handle == nullptr) {
+        return FM_RECOVERY_REQUIRED;
+    }
+    if (api.abi_version() != FM_ABI_VERSION) {
+        dlclose(api.handle);
+        return FM_ABI_MISMATCH;
+    }
+    fm_core_config config{};
+    config.header.struct_size = sizeof(config);
+    config.header.abi_version = FM_ABI_VERSION;
+    fm_core *core = nullptr;
+    fm_status status = api.create(&config, &core);
+    if (status == FM_OK) {
+        status = api.init(core, &config);
+    }
+    api.destroy(core);
+    return status;
 }
 
 fm_status validate_header(const fm_struct_header *header, size_t expected_size) {
@@ -78,28 +117,22 @@ extern "C" fm_status fm_boot(const fm_boot_ctx *ctx, fm_core **out) {
         return verified;
     }
 
-    CoreApi api = load_core();
+    return boot_with_api(ctx, load_core());
+}
+
+extern "C" fm_status fm_boot_with_core_fd(const fm_boot_ctx *ctx, int fd) {
+    if (ctx == nullptr) {
+        return FM_INVALID_ARGUMENT;
+    }
+    const fm_status verified = fm_boot_verify(ctx);
+    if (verified != FM_OK) {
+        return verified;
+    }
+    CoreApi api = load_core_fd(fd);
     if (api.handle == nullptr) {
-        return FM_RECOVERY_REQUIRED;
+        api = load_core();
     }
-    if (api.abi_version() != FM_ABI_VERSION) {
-        dlclose(api.handle);
-        return FM_ABI_MISMATCH;
-    }
-
-    fm_core_config config{};
-    config.header.struct_size = sizeof(config);
-    config.header.abi_version = FM_ABI_VERSION;
-
-    fm_core *core = nullptr;
-    fm_status status = api.create(&config, &core);
-    if (status == FM_OK) {
-        status = api.init(core, &config);
-    }
-    api.destroy(core);
-    // The handle stays mapped for the process lifetime; later stages resolve
-    // core_load_dex/verify through the same bounded API.
-    return status;
+    return boot_with_api(ctx, api);
 }
 
 extern "C" JNIEXPORT jint JNICALL
@@ -126,4 +159,13 @@ Java_dev_forgemirror_shield_ShieldRuntime_describe(JNIEnv *env, jclass) {
     return env->NewStringUTF(status == FM_OK
                                      ? "ForgeMirror: Core ABI v1 ready (P1-B boot)"
                                      : "ForgeMirror: Core initialization failed");
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_dev_forgemirror_shield_ShieldRuntime_nativeBootstrapWithCore(
+        JNIEnv *, jclass, jint fd) {
+    fm_boot_ctx ctx{};
+    ctx.header.struct_size = sizeof(ctx);
+    ctx.header.abi_version = FM_ABI_VERSION;
+    return static_cast<jint>(fm_boot_with_core_fd(&ctx, static_cast<int>(fd)));
 }

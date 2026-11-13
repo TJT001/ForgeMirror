@@ -23,6 +23,7 @@ final class ShieldConfig {
     final int rulesVersion;
     final String certSha256;
     final int maxNativeFileMb;
+    final String core;
 
     private ShieldConfig(
             String originalApplication,
@@ -42,7 +43,8 @@ final class ShieldConfig {
             String response,
             int rulesVersion,
             String certSha256,
-            int maxNativeFileMb) {
+            int maxNativeFileMb,
+            String core) {
         this.originalApplication = originalApplication;
         this.originalFactory = originalFactory;
         this.shellVersion = shellVersion;
@@ -61,6 +63,7 @@ final class ShieldConfig {
         this.rulesVersion = rulesVersion;
         this.certSha256 = certSha256;
         this.maxNativeFileMb = maxNativeFileMb;
+        this.core = core;
     }
 
     static ShieldConfig load(Context context) throws Exception {
@@ -83,6 +86,7 @@ final class ShieldConfig {
                 json.optString("response", "toast"),
                 json.optInt("rules_version", 1),
                 json.optString("cert_sha256", ""),
-                json.optInt("max_native_file_mb", 128));
+                json.optInt("max_native_file_mb", 128),
+                json.optString("core", ""));
     }
 }
