@@ -18,6 +18,9 @@ final class ShieldConfig {
     final String rules;
     final String eventUrl;
     final String eventToken;
+    final boolean detection;
+    final String response;
+    final int rulesVersion;
 
     private ShieldConfig(
             String originalApplication,
@@ -32,7 +35,10 @@ final class ShieldConfig {
             String authUrl,
             String rules,
             String eventUrl,
-            String eventToken) {
+            String eventToken,
+            boolean detection,
+            String response,
+            int rulesVersion) {
         this.originalApplication = originalApplication;
         this.originalFactory = originalFactory;
         this.shellVersion = shellVersion;
@@ -46,6 +52,9 @@ final class ShieldConfig {
         this.rules = rules;
         this.eventUrl = eventUrl;
         this.eventToken = eventToken;
+        this.detection = detection;
+        this.response = response;
+        this.rulesVersion = rulesVersion;
     }
 
     static ShieldConfig load(Context context) throws Exception {
@@ -63,6 +72,9 @@ final class ShieldConfig {
                 json.optString("auth_url", ""),
                 json.optString("rules", "shield/rules.pkr"),
                 json.optString("event_url", ""),
-                json.optString("event_token", ""));
+                json.optString("event_token", ""),
+                json.optBoolean("detection", true),
+                json.optString("response", "toast"),
+                json.optInt("rules_version", 1));
     }
 }

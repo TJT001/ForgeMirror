@@ -49,6 +49,10 @@ public class MainActivity extends AppCompatActivity {
             appStatus = "app=cast-failed";
         }
 
+        if (getIntent().getBooleanExtra("demo_toast", false)) {
+            ShieldStorageFacade.showDemoToast(this);
+        }
+
         TextView tv = binding.sampleText;
         String probeFile = getFilesDir() + "/harness_ra_renamed.txt";
         String probe = "probe writeErr=" + nativeProbeWrite(probeFile)

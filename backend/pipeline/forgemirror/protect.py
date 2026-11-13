@@ -211,6 +211,9 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             "auth_url": options.auth_url,
             "event_url": options.event_url,
             "event_token": options.event_token,
+            "detection": True,
+            "response": "toast",
+            "rules_version": 1,
             "app_id": package,
             "build_salt": secrets.token_hex(16),
         }

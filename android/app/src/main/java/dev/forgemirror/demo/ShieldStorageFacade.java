@@ -40,4 +40,8 @@ public final class ShieldStorageFacade {
             Context context, String name, String mode) throws java.io.FileNotFoundException {
         return dev.forgemirror.shield.ShieldStorage.openRandomAccessFile(context, name, mode);
     }
+
+    public static void showDemoToast(Context context) {
+        dev.forgemirror.shield.ShieldStorage.showDemoToast(context);
+    }
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -56,6 +57,11 @@ func (s *Server) Router() *gin.Engine {
 	api.POST("/events", s.clientAuth, s.addSecurityEvents)
 	api.GET("/events", s.listSecurityEvents)
 
+	api.GET("/config", s.clientAuth, s.getClientConfig)
+	api.POST("/config", s.clientAuth, s.setClientConfig)
+	api.POST("/rules", s.clientAuth, s.publishRulePackage)
+	api.GET("/rules/latest", s.clientAuth, s.latestRulePackage)
+
 	worker := api.Group("/worker", s.workerAuth)
 	worker.POST("/claim", s.claimTask)
 	worker.POST("/tasks/:id/heartbeat", s.heartbeat)
@@ -69,7 +75,7 @@ func cors() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Headers",
-			"Content-Type, X-Worker-Token, Last-Event-ID")
+			"Content-Type, X-Worker-Token, X-Client-Token, Last-Event-ID")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
@@ -480,4 +486,127 @@ func newUUID() string {
 	value[8] = (value[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", value[0:4], value[4:6], value[6:8],
 		value[8:10], value[10:16])
+}
+
+func (s *Server) getClientConfig(c *gin.Context) {
+	appPackage := c.Query("app_package")
+	if appPackage == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "app_package required"})
+		return
+	}
+	config, err := s.store.GetClientConfig(c.Request.Context(), appPackage)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ruleVersion := 0
+	if latest, err := s.store.LatestRulePackage(c.Request.Context(), appPackage); err == nil && latest != nil {
+		ruleVersion = latest.Version
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"app_package":  config.AppPackage,
+		"detection":    config.Detection,
+		"response":     config.Response,
+		"rule_version": ruleVersion,
+	})
+}
+
+func (s *Server) setClientConfig(c *gin.Context) {
+	var request struct {
+		AppPackage string `json:"app_package"`
+		Detection  bool   `json:"detection"`
+		Response   string `json:"response"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || request.AppPackage == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "app_package required"})
+		return
+	}
+	if request.Response != "log" && request.Response != "toast" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "response must be log or toast"})
+		return
+	}
+	config := store.ClientConfig{
+		AppPackage: request.AppPackage,
+		Detection:  request.Detection,
+		Response:   request.Response,
+	}
+	if err := s.store.SetClientConfig(c.Request.Context(), config); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, config)
+}
+
+func (s *Server) publishRulePackage(c *gin.Context) {
+	appPackage := c.Query("app_package")
+	version, err := strconv.Atoi(c.DefaultQuery("version", "0"))
+	if appPackage == "" || err != nil || version <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "app_package and positive version required"})
+		return
+	}
+	if filepath.Base(appPackage) != appPackage {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid app_package"})
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2<<20)
+	data, err := io.ReadAll(c.Request.Body)
+	if err != nil || len(data) < 32 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "rule package required"})
+		return
+	}
+	if len(data) < 4 || string(data[:4]) != "PKR1" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "not a PKR1 package"})
+		return
+	}
+	dir := filepath.Join(s.cfg.DataDir, "rules", appPackage)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	path := filepath.Join(dir, fmt.Sprintf("%d.pkr", version))
+	temp := path + ".tmp"
+	if err := os.WriteFile(temp, data, 0o644); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := os.Rename(temp, path); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	digest := sha256.Sum256(data)
+	sha := hex.EncodeToString(digest[:])
+	if err := s.store.PublishRulePackage(c.Request.Context(), appPackage, version, sha, path); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{
+		"app_package": appPackage,
+		"version":     version,
+		"sha256":      sha,
+	})
+}
+
+func (s *Server) latestRulePackage(c *gin.Context) {
+	appPackage := c.Query("app_package")
+	current, _ := strconv.Atoi(c.DefaultQuery("current", "0"))
+	if appPackage == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "app_package required"})
+		return
+	}
+	rule, err := s.store.LatestRulePackage(c.Request.Context(), appPackage)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if rule == nil || rule.Version <= current {
+		c.Status(http.StatusNoContent)
+		return
+	}
+	data, err := os.ReadFile(rule.Path)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "rule package missing"})
+		return
+	}
+	c.Header("X-Rule-Version", strconv.Itoa(rule.Version))
+	c.Data(http.StatusOK, "application/octet-stream", data)
 }

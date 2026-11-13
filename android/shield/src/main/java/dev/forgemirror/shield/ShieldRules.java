@@ -7,6 +7,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -36,18 +37,44 @@ final class ShieldRules {
 
     private final List<Rule> rules;
     private final ShieldYara yara;
+    final int version;
 
-    private ShieldRules(List<Rule> rules, ShieldYara yara) {
+    private ShieldRules(List<Rule> rules, ShieldYara yara, int version) {
         this.rules = rules;
         this.yara = yara;
+        this.version = version;
     }
 
     static ShieldRules load(Context context, ShieldConfig config, byte[] kContent) {
         if (config.rules == null || config.rules.isEmpty()) {
             return null;
         }
+        File remote = new File(context.getFilesDir(), "shield/rules.remote.pkr");
+        if (remote.isFile()) {
+            try {
+                byte[] pkg = readFile(remote);
+                ShieldRules loaded = parsePackage(context, config, kContent, pkg);
+                Log.i(TAG, "loaded remote rules version=" + loaded.version);
+                return loaded;
+            } catch (Exception error) {
+                Log.w(TAG, "remote rules rejected: " + error);
+            }
+        }
         try {
             byte[] pkg = ShieldAssets.read(context, config.rules);
+            return parsePackage(context, config, kContent, pkg);
+        } catch (Exception error) {
+            Log.w(TAG, "rules unavailable: " + error);
+            return null;
+        }
+    }
+
+    static ShieldRules parsePackage(Context context, ShieldConfig config,
+                                    byte[] kContent, byte[] pkg) throws Exception {
+        {
+            if (pkg == null) {
+                throw new SecurityException("empty rule package");
+            }
             if (pkg.length < HEADER_SIZE + TAG_SIZE + SIGNATURE_SIZE
                     || pkg[0] != MAGIC[0] || pkg[1] != MAGIC[1]
                     || pkg[2] != MAGIC[2] || pkg[3] != MAGIC[3]) {
@@ -94,7 +121,8 @@ final class ShieldRules {
                 }
                 rules.add(new Rule(item.getString("id"), all, needles));
             }
-            Log.i(TAG, "loaded " + rules.size() + " rules");
+            int ruleVersion = json.optInt("version", 1);
+            Log.i(TAG, "loaded " + rules.size() + " rules version=" + ruleVersion);
             ShieldYara yara = null;
             String yaraSource = json.optString("yara", "");
             if (!yaraSource.isEmpty()) {
@@ -105,10 +133,41 @@ final class ShieldRules {
                     Log.w(TAG, "YARA unavailable: " + error);
                 }
             }
-            return new ShieldRules(rules, yara);
-        } catch (Exception error) {
-            Log.w(TAG, "rules unavailable: " + error);
-            return null;
+            return new ShieldRules(rules, yara, ruleVersion);
+        }
+    }
+
+    static int currentVersion(Context context, ShieldConfig config) {
+        File versionFile = new File(context.getFilesDir(), "shield/rules.version");
+        if (versionFile.isFile()) {
+            try {
+                String text = new String(readFile(versionFile), StandardCharsets.UTF_8).trim();
+                return Integer.parseInt(text);
+            } catch (Exception ignored) {
+                // Fall back to the build version.
+            }
+        }
+        return config.rulesVersion;
+    }
+
+    private static byte[] readFile(File file) throws Exception {
+        byte[] data = new byte[(int) file.length()];
+        try (java.io.FileInputStream in = new java.io.FileInputStream(file)) {
+            int offset = 0;
+            while (offset < data.length) {
+                int read = in.read(data, offset, data.length - offset);
+                if (read < 0) {
+                    break;
+                }
+                offset += read;
+            }
+        }
+        return data;
+    }
+
+    void close() {
+        if (yara != null) {
+            yara.close();
         }
     }
 

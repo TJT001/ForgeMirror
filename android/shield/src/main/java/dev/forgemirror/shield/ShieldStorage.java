@@ -43,4 +43,15 @@ public final class ShieldStorage {
                 ? context.getApplicationContext() : context;
         return ShieldContextAdapter.openRandomAccessFile(base, name, mode);
     }
+
+    /** Debug-only response check; does nothing for non-debuggable apps. */
+    public static void showDemoToast(Context context) {
+        if ((context.getApplicationInfo().flags
+                & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) == 0) {
+            return;
+        }
+        java.util.List<ShieldDetect.Finding> findings = new java.util.ArrayList<>();
+        findings.add(new ShieldDetect.Finding("env_demo", "demo", "manual", 0.1));
+        ShieldResponse.dispatch(context, findings, "toast");
+    }
 }
