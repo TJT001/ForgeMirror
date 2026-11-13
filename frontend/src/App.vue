@@ -28,6 +28,8 @@ const taskId = ref('')
 const status = ref('')
 const events = ref<TaskEvent[]>([])
 const securityEvents = ref<SecurityEvent[]>([])
+const eventKind = ref('')
+const knownKinds = ref<string[]>([])
 const progress = ref(0)
 const error = ref('')
 const busy = ref(false)
@@ -45,10 +47,19 @@ function onFileChange(event: Event) {
 
 async function loadSecurityEvents() {
   try {
-    const response = await fetch('/api/v1/events?limit=50')
+    const params = new URLSearchParams({ limit: '50' })
+    if (eventKind.value) {
+      params.set('kind', eventKind.value)
+    }
+    const response = await fetch(`/api/v1/events?${params}`)
     if (response.ok) {
       const payload = await response.json()
       securityEvents.value = payload.events ?? []
+      if (!eventKind.value) {
+        knownKinds.value = [
+          ...new Set(securityEvents.value.map((event) => event.kind)),
+        ]
+      }
     }
   } catch {
     // The panel is best-effort; keep the last successful snapshot.
@@ -177,6 +188,16 @@ async function cancel() {
     <section class="card">
       <div class="meta">
         <span>安全事件</span>
+        <el-select
+          v-model="eventKind"
+          size="small"
+          style="width: 150px"
+          clearable
+          placeholder="全部类型"
+          @change="loadSecurityEvents"
+        >
+          <el-option v-for="kind in knownKinds" :key="kind" :label="kind" :value="kind" />
+        </el-select>
         <el-button size="small" @click="loadSecurityEvents">刷新</el-button>
       </div>
       <el-table :data="securityEvents" size="small" empty-text="暂无事件">

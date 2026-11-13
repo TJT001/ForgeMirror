@@ -354,7 +354,8 @@ func (s *Server) listSecurityEvents(c *gin.Context) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	events, err := s.store.ListSecurityEvents(c.Request.Context(), limit)
+	events, err := s.store.ListSecurityEvents(c.Request.Context(), limit,
+		c.Query("kind"), c.Query("app_package"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -46,13 +46,15 @@ func (s *Store) AddSecurityEvents(ctx context.Context, appPackage string,
 	return s.pool.SendBatch(ctx, batch).Close()
 }
 
-func (s *Store) ListSecurityEvents(ctx context.Context, limit int) ([]SecurityEvent, error) {
+func (s *Store) ListSecurityEvents(ctx context.Context, limit int, kind, appPackage string) ([]SecurityEvent, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, app_package, device_id, kind, rule_id, confidence,
 		       evidence_hash, payload, created_at
 		FROM security_events
+		WHERE ($2 = '' OR kind = $2)
+		  AND ($3 = '' OR app_package = $3)
 		ORDER BY id DESC
-		LIMIT $1`, limit)
+		LIMIT $1`, limit, kind, appPackage)
 	if err != nil {
 		return nil, err
 	}
