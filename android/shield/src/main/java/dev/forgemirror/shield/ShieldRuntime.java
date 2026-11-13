@@ -12,6 +12,7 @@ import java.io.File;
 import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -39,7 +40,9 @@ public final class ShieldRuntime {
     private static volatile int dexCount;
     private static volatile long decryptMs;
     private static volatile ShieldPolicy policy;
+    private static volatile ShieldRules rules;
     private static volatile byte[] fileKey;
+    private static volatile boolean ruleScanStarted;
     private static final Map<String, ShieldSharedPreferences> PREFS = new HashMap<>();
 
     static {
@@ -87,6 +90,7 @@ public final class ShieldRuntime {
                     return state;
                 }
                 fileKey = ShieldPolicy.deriveFileKey(key, config.buildId);
+                rules = ShieldRules.load(context, config, key);
                 byte[] container = ShieldAssets.read(context, config.container);
                 byte[][] dex = ShieldContainer.open(container, key);
                 ByteBuffer[] buffers = new ByteBuffer[dex.length];
@@ -119,6 +123,7 @@ public final class ShieldRuntime {
 
             state = STATE_DEX_READY;
             state = STATE_APP_ATTACHED;
+            startRuleScan(context);
             Log.i(TAG, "bootstrap ok state=" + state);
             return state;
         } catch (Throwable error) {
@@ -206,6 +211,22 @@ public final class ShieldRuntime {
         } catch (Throwable error) {
             Log.w(TAG, "activity context adaptation failed", error);
         }
+    }
+
+    private static void startRuleScan(Context context) {
+        ShieldRules active = rules;
+        if (active == null || ruleScanStarted) {
+            return;
+        }
+        ruleScanStarted = true;
+        Thread thread = new Thread(() -> {
+            long started = SystemClock.elapsedRealtime();
+            List<String> matches = active.scanApk(context.getApplicationInfo().sourceDir);
+            Log.i(TAG, "rule scan done matches=" + matches
+                    + " ms=" + (SystemClock.elapsedRealtime() - started));
+        }, "shield-rule-scan");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     public static void markRunning() {

@@ -8,5 +8,6 @@
   "trusted_key": "shield/trusted_key.der",
   "key": "",
   "policy": "shield/policy.pkg",
+  "rules": "shield/rules.pkr",
   "build_id": ""
 }

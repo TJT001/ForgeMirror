@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 from .formats.container import open_container
 from .formats.policy import PolicyError, open_policy
+from .formats.rules import open_rules
 
 DEX_RE = re.compile(r"^classes\d*\.dex$")
 
@@ -130,12 +131,24 @@ def _red_team_checks(apk: Path, container: Path, k_content: bytes, manifest: dic
     except (PolicyError, Exception):
         checks.append(_status("a3_policy_key_required", True))
 
-    # A4: rules are not implemented yet; record as inconclusive.
-    checks.append({
-        "name": "a4_rules",
-        "status": "inconclusive",
-        "detail": "S4 rule package not implemented (planned P3)",
-    })
+    # A4: rule package authenticated and bound to the content key.
+    try:
+        with zipfile.ZipFile(apk) as archive:
+            rules_pkg = archive.read("assets/shield/rules.pkr")
+            trusted_der = archive.read("assets/shield/trusted_key.der")
+        public_key = serialization.load_der_public_key(trusted_der)
+        build_id = uuid.UUID(manifest["build_id"]).bytes
+        open_rules(rules_pkg, k_content=k_content, build_id=build_id,
+                   public_key=public_key)
+        checks.append(_status("a4_rules_signature", True))
+        try:
+            open_rules(rules_pkg, k_content=os.urandom(32), build_id=build_id,
+                       public_key=public_key)
+            checks.append(_status("a4_rules_key_required", False))
+        except Exception:
+            checks.append(_status("a4_rules_key_required", True))
+    except Exception as error:
+        checks.append(_status("a4_rules_signature", False, str(error)))
     return checks
 
 

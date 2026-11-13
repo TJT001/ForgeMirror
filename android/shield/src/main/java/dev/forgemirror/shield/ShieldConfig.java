@@ -15,6 +15,7 @@ final class ShieldConfig {
     final String policy;
     final String buildId;
     final String authUrl;
+    final String rules;
 
     private ShieldConfig(
             String originalApplication,
@@ -26,7 +27,8 @@ final class ShieldConfig {
             String key,
             String policy,
             String buildId,
-            String authUrl) {
+            String authUrl,
+            String rules) {
         this.originalApplication = originalApplication;
         this.originalFactory = originalFactory;
         this.shellVersion = shellVersion;
@@ -37,6 +39,7 @@ final class ShieldConfig {
         this.policy = policy;
         this.buildId = buildId;
         this.authUrl = authUrl;
+        this.rules = rules;
     }
 
     static ShieldConfig load(Context context) throws Exception {
@@ -51,6 +54,7 @@ final class ShieldConfig {
                 json.optString("key", ""),
                 json.optString("policy", ""),
                 json.optString("build_id", ""),
-                json.optString("auth_url", ""));
+                json.optString("auth_url", ""),
+                json.optString("rules", "shield/rules.pkr"));
     }
 }

@@ -18,6 +18,7 @@ from .apk import elf_arch
 from .formats import axml
 from .formats.container import open_container
 from .formats.policy import pack_policy
+from .formats.rules import pack_rules
 from .s6 import (
     build_envelope,
     collect_artifacts,
@@ -42,6 +43,24 @@ DEFAULT_POLICY = {
     "excludes": [
         {"pattern": "databases/*"},
         {"pattern": "cache/**"},
+    ],
+}
+
+DEFAULT_RULES = {
+    "schema": "forgemirror.rules/1",
+    "version": 1,
+    "min_shell_version": "0.1.0",
+    "rules": [
+        {
+            "id": "demo_jni",
+            "logic": "all",
+            "strings": ["Java_dev_forgemirror_demo_MainActivity_stringFromJNI"],
+        },
+        {
+            "id": "frida_like",
+            "logic": "any",
+            "strings": ["frida", "FRIDA"],
+        },
     ],
 }
 
@@ -182,6 +201,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             "trusted_key": "shield/trusted_key.der",
             "key": "" if options.no_key_asset else "shield/k_content.bin",
             "policy": "shield/policy.pkg",
+            "rules": "shield/rules.pkr",
             "build_id": options.build_id,
             "auth_url": options.auth_url,
             "app_id": package,
@@ -189,6 +209,13 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
         }
         policy_pkg = pack_policy(
             DEFAULT_POLICY,
+            k_content=k_content,
+            build_id=uuid.UUID(options.build_id).bytes,
+            private_key=signing_key,
+            alg=policy_alg,
+        )
+        rules_pkg = pack_rules(
+            DEFAULT_RULES,
             k_content=k_content,
             build_id=uuid.UUID(options.build_id).bytes,
             private_key=signing_key,
@@ -203,6 +230,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
                 config, indent=2, sort_keys=True
             ).encode("utf-8"),
             "assets/shield/policy.pkg": policy_pkg,
+            "assets/shield/rules.pkr": rules_pkg,
             "assets/shield/trusted_key.der": der,
         }
         if not options.no_key_asset:
@@ -218,6 +246,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             "assets/container.fdx",
             "assets/shield/config.json",
             "assets/shield/policy.pkg",
+            "assets/shield/rules.pkr",
             "assets/shield/trusted_key.der",
         }
         if not options.no_key_asset:
@@ -268,6 +297,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
         "signing_mode": options.signing_mode,
         "signed": signed,
         "stripped_libs": len(stripped_libs),
+        "rule_count": len(DEFAULT_RULES["rules"]),
         "warnings": warnings,
         "signer_sha256": signer,
     }
