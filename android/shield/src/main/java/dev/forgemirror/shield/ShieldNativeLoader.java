@@ -5,6 +5,7 @@ import android.util.Log;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.lang.reflect.Method;
@@ -55,7 +56,11 @@ final class ShieldNativeLoader {
                     continue;
                 }
                 registerNatives(callerClass(loader), handle);
-                String path = apkPath + "!/lib/" + abi + "/libshield_dummy.so";
+                String holder = "libshield_holder_" + hex(digest(mapped)) + ".so";
+                String path = apkPath + "!/lib/" + abi + "/" + holder;
+                if (apk.getEntry("lib/" + abi + "/" + holder) == null) {
+                    path = apkPath + "!/lib/" + abi + "/libshield_dummy.so";
+                }
                 LOADED.put(cacheKey, path);
                 Log.i(TAG, "loaded from memfd " + mapped);
                 return path;
@@ -129,6 +134,23 @@ final class ShieldNativeLoader {
         if (type == float.class) return "F";
         if (type == double.class) return "D";
         return "L" + type.getName().replace('.', '/') + ";";
+    }
+
+    private static byte[] digest(String value) {
+        try {
+            return MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8));
+        } catch (Exception error) {
+            return new byte[0];
+        }
+    }
+
+    private static String hex(byte[] value) {
+        StringBuilder result = new StringBuilder();
+        for (int index = 0; index < Math.min(value.length, 8); index++) {
+            result.append(String.format(java.util.Locale.US, "%02x", value[index] & 0xff));
+        }
+        return result.toString();
     }
 
     private static String mangle(String value) {

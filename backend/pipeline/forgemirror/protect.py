@@ -5,6 +5,7 @@ injects encrypted assets, signs the manifest, aligns, and signs the package.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -328,6 +329,11 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
                     native_assets[
                         f"assets/shield/native/{parts[1]}/{base}.enc"
                     ] = _encrypt_native(data, native_key)
+                    holder = "libshield_holder_" + hashlib.sha256(
+                        base.encode("utf-8")).hexdigest()[:16] + ".so"
+                    template = f"lib/{parts[1]}/libshield_dummy.so"
+                    if template in shield_libs:
+                        shield_libs[f"lib/{parts[1]}/{holder}"] = shield_libs[template]
                     drop_libs.add(info.filename)
                     stripped_libs.pop(info.filename, None)
 

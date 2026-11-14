@@ -20,7 +20,7 @@ RAII 封装，供 native loader 使用。
 | `safejni.h` | `LocalRef`、`Utf8String`、`ByteArray`、`findClass/staticMethod/method/toString`、异常清理 |
 | `ShieldClassLoader.findLibrary` | 优先使用加密 asset 的内存加载；不存在时回退 APK `lib/` |
 | `app_native_caller` | 识别 `/memfd:` caller，使 memfd 加载的业务库仍进入透明 I/O hook |
-| `libshield_dummy.so` | 仅作为 `System.loadLibrary` 的占位路径，让 ClassLoader 完成登记 |
+| `libshield_dummy.so` | 作为模板；每个加密库生成唯一 `libshield_holder_<hash>.so` 占位路径，供 ClassLoader 登记 |
 
 ### 加载链
 
@@ -45,6 +45,7 @@ assets/shield/native/arm64-v8a/libdemo.so.enc
 assets/shield/native/armeabi-v7a/libdemo.so.enc
 assets/shield/native/x86/libdemo.so.enc
 assets/shield/native/x86_64/libdemo.so.enc
+lib/<abi>/libshield_holder_<sha256(libname)[:16]>.so
 无 lib/*/libdemo.so
 ```
 
@@ -52,11 +53,12 @@ assets/shield/native/x86_64/libdemo.so.enc
 
 ```text
 ShieldNativeLoader: loaded from memfd libdemo.so
+ShieldNativeLoader: loaded from memfd libdemo2.so
 ShieldNativeIo: open shadow fd=... merge_probe.txt
 readback prefs=true counter=1 file=true append=true ra=true
          mmap=true sqlite=true
 probe writeErr=0 readErr=0 mmapErr=0 syscallErr=0
-dupErr=0 javaDup=D2XYZ6 lockErr=0
+dupErr=0 javaDup=D2XYZ6 second=7 lockErr=0
 merge writeErr=0 closeErr=0 main=MAIN remote=REMOTE
 files/harness_ra_renamed.txt magic: 46 4d 46 32 (FMF2)
 ```
@@ -73,7 +75,7 @@ files/harness_ra_renamed.txt magic: 46 4d 46 32 (FMF2)
 2. 隐式 `Java_*` 注册使用短符号，重载 native 方法需要补长符号/签名的精确
    mangling；`JNI_OnLoad` 若依赖业务 ClassLoader/FindClass，可能因 linker
    调用上下文而失败。
-3. `System.loadLibrary` 的占位路径目前固定为 `libshield_dummy.so`；同一
-   ClassLoader 连续加载多个加密库时需要进一步验证/生成唯一占位名。
+3. 占位路径按库名生成唯一 `libshield_holder_<hash>.so`；双库连续加载已在
+   demo 验证（`second=7`），但占位 ELF 的 SONAME 仍相同，极端 linker 行为需继续观察。
 4. 只处理显式选择的库；依赖库、`dlopen` 直连路径、x86 原生 hook 未覆盖。
 5. `safejni` 目前是 header-only 基础层，尚未覆盖全部 JNI 引用类型和异常语义。
