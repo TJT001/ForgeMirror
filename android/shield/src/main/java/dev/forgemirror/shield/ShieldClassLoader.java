@@ -26,11 +26,23 @@ final class ShieldClassLoader extends BaseDexClassLoader {
     private final String[] abis;
 
     ShieldClassLoader(ByteBuffer[] dexBuffers, ClassLoader parent, Context context) {
-        super("", null, null, parent);
+        super("", null, searchPath(context), parent);
         this.context = context;
         this.apkPath = context.getApplicationInfo().sourceDir;
         this.abis = Build.SUPPORTED_ABIS;
         installDexElements(dexBuffers);
+    }
+
+    private static String searchPath(Context context) {
+        String apkPath = context.getApplicationInfo().sourceDir;
+        String nativeDir = context.getApplicationInfo().nativeLibraryDir;
+        StringBuilder path = new StringBuilder(
+                nativeDir == null ? "" : nativeDir);
+        for (String abi : Build.SUPPORTED_ABIS) {
+            path.append(java.io.File.pathSeparator)
+                    .append(apkPath).append("!/lib/").append(abi);
+        }
+        return path.toString();
     }
 
     private void installDexElements(ByteBuffer[] dexBuffers) {

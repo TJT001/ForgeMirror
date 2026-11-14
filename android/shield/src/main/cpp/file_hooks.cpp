@@ -20,10 +20,10 @@
 #include <cstring>
 #include <chrono>
 #include <mutex>
+#include <unordered_set>
 #include <string>
 #include <thread>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace {
@@ -34,6 +34,10 @@ constexpr size_t kMaxPath = 512;
 
 std::mutex gLock;
 std::string gDataDir;
+constexpr int kMaxNativeNames = 64;
+constexpr int kMaxNativeName = 128;
+char gNativeLibNames[kMaxNativeNames][kMaxNativeName];
+std::atomic<int> gNativeLibCount{0};
 std::atomic<bool> gEnforce{false};
 std::atomic<bool> gInstalled{false};
 std::atomic<bool> gBlockAll{false};
@@ -87,6 +91,7 @@ using dup3_t = int (*)(int, int, int);
 using flock_t = int (*)(int, int);
 using fcntl_t = int (*)(int, int, ...);
 using dlopen_t = void *(*)(const char *, int);
+using loader_dlopen_t = void *(*)(const char *, int, const void *);
 using rename_t = int (*)(const char *, const char *);
 using renameat_t = int (*)(int, const char *, int, const char *);
 using unlink_t = int (*)(const char *);
@@ -1094,19 +1099,57 @@ ssize_t proxy_writev(int fd, const struct iovec *iov, int count) {
     return result;
 }
 
-void *proxy_dlopen(const char *filename, int flags) {
-    SHADOWHOOK_STACK_SCOPE();
-    auto prev = (dlopen_t) shadowhook_get_prev_func((void *) &proxy_dlopen);
+bool encrypted_dlopen(const char *filename, std::string *path) {
     if (gInternal || filename == nullptr) {
-        return prev != nullptr ? prev(filename, flags) : nullptr;
+        return false;
     }
     const char *slash = strrchr(filename, '/');
     const char *base = slash == nullptr ? filename : slash + 1;
-    std::string path = java_native_path(base);
-    if (!path.empty() && prev != nullptr) {
+    bool encrypted = false;
+    int known = gNativeLibCount.load(std::memory_order_acquire);
+    for (int index = 0; index < known; index++) {
+        if (strcmp(gNativeLibNames[index], base) == 0) {
+            encrypted = true;
+            break;
+        }
+    }
+    if (!encrypted) {
+        return false;
+    }
+    *path = java_native_path(base);
+    if (!path->empty()) {
+        __android_log_print(ANDROID_LOG_INFO, kTag, "dlopen redirect %s",
+                            base);
+        return true;
+    }
+    return false;
+}
+
+void *proxy_dlopen(const char *filename, int flags) {
+    SHADOWHOOK_STACK_SCOPE();
+    auto prev = (dlopen_t) shadowhook_get_prev_func((void *) &proxy_dlopen);
+    if (prev == nullptr) {
+        return nullptr;
+    }
+    std::string path;
+    if (encrypted_dlopen(filename, &path)) {
         return prev(path.c_str(), flags);
     }
-    return prev != nullptr ? prev(filename, flags) : nullptr;
+    return prev(filename, flags);
+}
+
+void *proxy_loader_dlopen(const char *filename, int flags, const void *caller) {
+    SHADOWHOOK_STACK_SCOPE();
+    auto prev = (loader_dlopen_t) shadowhook_get_prev_func(
+            (void *) &proxy_loader_dlopen);
+    if (prev == nullptr) {
+        return nullptr;
+    }
+    std::string path;
+    if (encrypted_dlopen(filename, &path)) {
+        return prev(path.c_str(), flags, caller);
+    }
+    return prev(filename, flags, caller);
 }
 
 int proxy_dup(int oldfd) {
@@ -1404,33 +1447,57 @@ void *proxy_mmap64(void *addr, size_t length, int prot, int flags, int fd, off64
 }
 
 template <typename T>
-int hook_one(const char *lib, const char *symbol, void *replacement,
-             T *original) {
+int hook(const char *symbol, void *replacement, T *original) {
     (void) original;
-    void *stub = shadowhook_hook_sym_name(lib, symbol, replacement, nullptr);
-    if (stub != nullptr) {
-        __android_log_print(ANDROID_LOG_INFO, kTag, "hook %s in %s ok", symbol, lib);
-        return 1;
-    }
-    return 0;
-}
-
-template <typename T>
-void hook(const char *symbol, void *replacement, T *original) {
-    int installed = 0;
+    void *addresses[16];
+    int count = 0;
+    auto add = [&addresses, &count](void *address) {
+        if (address == nullptr) {
+            return;
+        }
+        for (int index = 0; index < count; index++) {
+            if (addresses[index] == address) {
+                return;
+            }
+        }
+        if (count < static_cast<int>(sizeof(addresses) / sizeof(addresses[0]))) {
+            addresses[count++] = address;
+        }
+    };
     const char *libs[] = {
         "libc.so",
+        "libdl.so",
         "/system/lib64/libc.so",
         "/system/lib/libc.so",
         "/apex/com.android.runtime/lib64/bionic/libc.so",
         "/apex/com.android.runtime/lib/bionic/libc.so",
+        "/system/lib64/libdl.so",
+        "/system/lib/libdl.so",
+        "/apex/com.android.runtime/lib64/bionic/libdl.so",
+        "/apex/com.android.runtime/lib/bionic/libdl.so",
     };
     for (const char *lib : libs) {
-        installed += hook_one<T>(lib, symbol, replacement, original);
+        void *handle = dlopen(lib, RTLD_NOW | RTLD_NOLOAD);
+        if (handle == nullptr) {
+            continue;
+        }
+        add(dlsym(handle, symbol));
+    }
+    add(dlsym(RTLD_DEFAULT, symbol));
+    int installed = 0;
+    for (int index = 0; index < count; index++) {
+        void *stub = shadowhook_hook_sym_addr(addresses[index], replacement,
+                                             nullptr);
+        if (stub != nullptr) {
+            installed++;
+            __android_log_print(ANDROID_LOG_INFO, kTag,
+                                "hook %s at %p ok", symbol, addresses[index]);
+        }
     }
     if (installed == 0) {
         __android_log_print(ANDROID_LOG_WARN, kTag, "hook %s failed", symbol);
     }
+    return installed;
 }
 
 void install() {
@@ -1452,22 +1519,10 @@ void install() {
     hook("dup", reinterpret_cast<void *>(&proxy_dup), &g_dup);
     hook("dup2", reinterpret_cast<void *>(&proxy_dup2), &g_dup2);
     hook("dup3", reinterpret_cast<void *>(&proxy_dup3), &g_dup3);
-    {
-        const char *dllibs[] = {
-            "libdl.so",
-            "/system/lib64/libdl.so",
-            "/system/lib/libdl.so",
-            "/apex/com.android.runtime/lib64/bionic/libdl.so",
-            "/apex/com.android.runtime/lib/bionic/libdl.so",
-        };
-        int installed = 0;
-        for (const char *lib : dllibs) {
-            installed += hook_one<dlopen_t>(lib, "dlopen",
-                    reinterpret_cast<void *>(&proxy_dlopen), &g_dlopen);
-        }
-        if (installed == 0) {
-            hook("dlopen", reinterpret_cast<void *>(&proxy_dlopen), &g_dlopen);
-        }
+    if (hook("__loader_dlopen",
+             reinterpret_cast<void *>(&proxy_loader_dlopen),
+             &g_dlopen) == 0) {
+        hook("dlopen", reinterpret_cast<void *>(&proxy_dlopen), &g_dlopen);
     }
     hook("flock", reinterpret_cast<void *>(&proxy_flock), &g_flock);
     hook("fcntl", reinterpret_cast<void *>(&proxy_fcntl), &g_fcntl);
@@ -1497,10 +1552,34 @@ void install() {
 
 extern "C" JNIEXPORT jint JNICALL
 Java_dev_forgemirror_shield_ShieldNativeFileHook_nativeConfigure(
-    JNIEnv *env, jclass type, jstring dataDir, jboolean enforce) {
+    JNIEnv *env, jclass type, jstring dataDir, jboolean enforce,
+    jobjectArray nativeNames) {
     (void) type;
     if (dataDir == nullptr) {
         return -1;
+    }
+    {
+        gNativeLibCount.store(0, std::memory_order_release);
+        jsize count = nativeNames == nullptr ? 0 : env->GetArrayLength(nativeNames);
+        for (jsize index = 0; index < count; index++) {
+            jstring value = static_cast<jstring>(
+                    env->GetObjectArrayElement(nativeNames, index));
+            if (value == nullptr) {
+                continue;
+            }
+            const char *chars = env->GetStringUTFChars(value, nullptr);
+            if (chars != nullptr) {
+                int slot = gNativeLibCount.load(std::memory_order_relaxed);
+                if (slot < kMaxNativeNames) {
+                    snprintf(gNativeLibNames[slot], kMaxNativeName, "%s", chars);
+                    gNativeLibCount.store(slot + 1, std::memory_order_release);
+                }
+                env->ReleaseStringUTFChars(value, chars);
+            }
+            env->DeleteLocalRef(value);
+        }
+        __android_log_print(ANDROID_LOG_INFO, kTag, "native lib names=%d",
+                            gNativeLibCount.load(std::memory_order_acquire));
     }
     const char *dir = env->GetStringUTFChars(dataDir, nullptr);
     if (dir == nullptr) {

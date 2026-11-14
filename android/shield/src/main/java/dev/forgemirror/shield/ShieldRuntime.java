@@ -102,7 +102,8 @@ public final class ShieldRuntime {
                 ShieldNativeIo.configure(context, config.maxNativeFileMb);
                 try {
                     int hookStatus = ShieldNativeFileHook.configure(
-                            context.getApplicationInfo().dataDir, true);
+                            context.getApplicationInfo().dataDir, true,
+                            ShieldNativeLoader.encryptedLibraries(context));
                     Log.i(TAG, "native file hooks status=" + hookStatus);
                 } catch (Throwable error) {
                     Log.w(TAG, "native file hooks unavailable: " + error);

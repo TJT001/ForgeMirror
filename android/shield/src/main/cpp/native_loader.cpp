@@ -91,6 +91,18 @@ Java_dev_forgemirror_shield_ShieldRuntime_nativeLoadInMemory(
             static_cast<size_t>(data.size()),
             label.get() == nullptr ? "fm-native" : label.get());
     if (image != nullptr) {
+        void *onLoad = forgemirror::elf::symbol(image, "JNI_OnLoad");
+        if (onLoad != nullptr) {
+            JavaVM *vm = nullptr;
+            if (env->GetJavaVM(&vm) == JNI_OK && vm != nullptr) {
+                using jni_on_load_t = jint (*)(JavaVM *, void *);
+                jint version = reinterpret_cast<jni_on_load_t>(onLoad)(vm, nullptr);
+                __android_log_print(ANDROID_LOG_INFO, kTag,
+                                    "JNI_OnLoad %s returned %d",
+                                    label.get() == nullptr ? "?" : label.get(),
+                                    version);
+            }
+        }
         return reinterpret_cast<jlong>(image);
     }
     int flags = RTLD_NOW | (global == JNI_TRUE ? RTLD_GLOBAL : 0);

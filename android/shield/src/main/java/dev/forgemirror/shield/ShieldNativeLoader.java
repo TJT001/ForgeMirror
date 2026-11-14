@@ -20,6 +20,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -126,6 +127,7 @@ final class ShieldNativeLoader {
             }
             String entry = findAsset(apk, abis, dependency);
             if (entry == null) {
+                loadPlatform(dependency);
                 continue;
             }
             synchronized (PRELOADED) {
@@ -148,6 +150,47 @@ final class ShieldNativeLoader {
                 Log.w(TAG, "dependency preload failed " + dependency + ": " + error);
             }
         }
+    }
+
+    private static void loadPlatform(String soname) {
+        synchronized (PRELOADED) {
+            if (!PRELOADED.add(soname)) {
+                return;
+            }
+        }
+        String name = soname;
+        if (name.startsWith("lib")) {
+            name = name.substring(3);
+        }
+        if (name.endsWith(".so")) {
+            name = name.substring(0, name.length() - 3);
+        }
+        try {
+            System.loadLibrary(name);
+            Log.i(TAG, "preloaded platform " + soname);
+        } catch (Throwable error) {
+            PRELOADED.remove(soname);
+            Log.w(TAG, "platform preload failed " + soname + ": " + error);
+        }
+    }
+
+    static String[] encryptedLibraries(Context context) {
+        Set<String> names = new TreeSet<>();
+        try (ZipFile apk = new ZipFile(context.getApplicationInfo().sourceDir)) {
+            java.util.Enumeration<? extends ZipEntry> entries = apk.entries();
+            while (entries.hasMoreElements()) {
+                String name = entries.nextElement().getName();
+                if (!name.startsWith("assets/shield/native/")
+                        || !name.endsWith(".so.enc")) {
+                    continue;
+                }
+                String base = name.substring(name.lastIndexOf('/') + 1);
+                names.add(base.substring(0, base.length() - 4));
+            }
+        } catch (Exception error) {
+            Log.w(TAG, "encrypted library scan failed: " + error);
+        }
+        return names.toArray(new String[0]);
     }
 
     private static String findAsset(ZipFile apk, String[] abis, String mapped) {

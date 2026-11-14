@@ -29,6 +29,8 @@ struct Image {
     size_t symbolCount = 0;
     const char *strings = nullptr;
     std::vector<SegmentInfo> segments;
+    uintptr_t relroAddress = 0;
+    size_t relroSize = 0;
 };
 
 namespace {
@@ -106,7 +108,11 @@ bool configureSymbols(Image *image, ElfW(Dyn) *dynamic, uintptr_t base) {
             uint32_t buckets = table[0];
             uint32_t symbolOffset = table[1];
             uint32_t bloomSize = table[2];
+#if defined(__LP64__)
             const uint32_t *bucketTable = table + 4 + bloomSize * 2;
+#else
+            const uint32_t *bucketTable = table + 4 + bloomSize;
+#endif
             const uint32_t *chainTable = bucketTable + buckets;
             uint32_t maximum = symbolOffset;
             for (uint32_t index = 0; index < buckets; index++) {
@@ -175,86 +181,184 @@ void *resolveSymbol(Image *image, uint32_t index, const char *name) {
     return dlsym(RTLD_DEFAULT, name);
 }
 
-void applyRelocation(Image *image, uintptr_t base, uint32_t symbolIndex,
+bool applyRelocation(Image *image, uintptr_t base, uint32_t symbolIndex,
                      uint32_t type, uintptr_t offset, intptr_t addend) {
-    const char *name = image->strings +
-            image->symbols[symbolIndex].st_name;
+    if (symbolIndex >= image->symbolCount) {
+        return false;
+    }
+    const ElfW(Sym) &symbol = image->symbols[symbolIndex];
+    const char *name = image->strings + symbol.st_name;
     void *resolved = resolveSymbol(image, symbolIndex, name);
+#if defined(__LP64__)
+    const bool resolvedOk = resolved != nullptr
+            || ELF64_ST_BIND(symbol.st_info) == STB_WEAK;
+#else
+    const bool resolvedOk = resolved != nullptr
+            || ELF32_ST_BIND(symbol.st_info) == STB_WEAK;
+#endif
     uintptr_t target = base + offset;
     switch (type) {
 #if defined(__aarch64__)
         case R_AARCH64_NONE:
-            return;
+            return true;
         case R_AARCH64_RELATIVE:
             *reinterpret_cast<uintptr_t *>(target) = base + addend;
-            return;
+            return true;
         case R_AARCH64_ABS64:
+            if (!resolvedOk) {
+                return false;
+            }
             *reinterpret_cast<uintptr_t *>(target) =
                     reinterpret_cast<uintptr_t>(resolved) + addend;
-            return;
+            return true;
         case R_AARCH64_GLOB_DAT:
         case R_AARCH64_JUMP_SLOT:
+            if (!resolvedOk) {
+                return false;
+            }
             *reinterpret_cast<uintptr_t *>(target) =
                     reinterpret_cast<uintptr_t>(resolved);
-            return;
+            return true;
+        case R_AARCH64_IRELATIVE:
+            *reinterpret_cast<uintptr_t *>(target) =
+                    reinterpret_cast<uintptr_t>(
+                            reinterpret_cast<void *(*)()>(base + addend)());
+            return true;
+#ifdef R_AARCH64_COPY
+        case R_AARCH64_COPY:
+            if (!resolvedOk) {
+                return false;
+            }
+            if (resolved != nullptr) {
+                std::memcpy(reinterpret_cast<void *>(target), resolved,
+                            image->symbols[symbolIndex].st_size);
+            }
+            return true;
+#endif
 #elif defined(__x86_64__)
         case R_X86_64_NONE:
-            return;
+            return true;
         case R_X86_64_RELATIVE:
             *reinterpret_cast<uintptr_t *>(target) = base + addend;
-            return;
+            return true;
         case R_X86_64_64:
+            if (!resolvedOk) {
+                return false;
+            }
             *reinterpret_cast<uintptr_t *>(target) =
                     reinterpret_cast<uintptr_t>(resolved) + addend;
-            return;
+            return true;
         case R_X86_64_GLOB_DAT:
         case R_X86_64_JUMP_SLOT:
+            if (!resolvedOk) {
+                return false;
+            }
             *reinterpret_cast<uintptr_t *>(target) =
                     reinterpret_cast<uintptr_t>(resolved);
-            return;
+            return true;
+        case R_X86_64_IRELATIVE:
+            *reinterpret_cast<uintptr_t *>(target) =
+                    reinterpret_cast<uintptr_t>(
+                            reinterpret_cast<void *(*)()>(base + addend)());
+            return true;
+#ifdef R_X86_64_COPY
+        case R_X86_64_COPY:
+            if (!resolvedOk) {
+                return false;
+            }
+            if (resolved != nullptr) {
+                std::memcpy(reinterpret_cast<void *>(target), resolved,
+                            image->symbols[symbolIndex].st_size);
+            }
+            return true;
+#endif
 #elif defined(__arm__)
         case R_ARM_NONE:
-            return;
+            return true;
         case R_ARM_RELATIVE:
             *reinterpret_cast<uintptr_t *>(target) = base + addend;
-            return;
+            return true;
         case R_ARM_ABS32:
+            if (!resolvedOk) {
+                return false;
+            }
             *reinterpret_cast<uintptr_t *>(target) =
                     reinterpret_cast<uintptr_t>(resolved) + addend;
-            return;
+            return true;
         case R_ARM_GLOB_DAT:
         case R_ARM_JUMP_SLOT:
+            if (!resolvedOk) {
+                return false;
+            }
             *reinterpret_cast<uintptr_t *>(target) =
                     reinterpret_cast<uintptr_t>(resolved);
-            return;
+            return true;
+        case R_ARM_IRELATIVE:
+            *reinterpret_cast<uintptr_t *>(target) =
+                    reinterpret_cast<uintptr_t>(
+                            reinterpret_cast<void *(*)()>(base + addend)());
+            return true;
+#ifdef R_ARM_COPY
+        case R_ARM_COPY:
+            if (!resolvedOk) {
+                return false;
+            }
+            if (resolved != nullptr) {
+                std::memcpy(reinterpret_cast<void *>(target), resolved,
+                            image->symbols[symbolIndex].st_size);
+            }
+            return true;
+#endif
 #elif defined(__i386__)
         case R_386_NONE:
-            return;
+            return true;
         case R_386_RELATIVE:
             *reinterpret_cast<uintptr_t *>(target) = base + addend;
-            return;
+            return true;
         case R_386_32:
+            if (!resolvedOk) {
+                return false;
+            }
             *reinterpret_cast<uintptr_t *>(target) =
                     reinterpret_cast<uintptr_t>(resolved) + addend;
-            return;
+            return true;
         case R_386_GLOB_DAT:
         case R_386_JMP_SLOT:
+            if (!resolvedOk) {
+                return false;
+            }
             *reinterpret_cast<uintptr_t *>(target) =
                     reinterpret_cast<uintptr_t>(resolved);
-            return;
+            return true;
+        case R_386_IRELATIVE:
+            *reinterpret_cast<uintptr_t *>(target) =
+                    reinterpret_cast<uintptr_t>(
+                            reinterpret_cast<void *(*)()>(base + addend)());
+            return true;
+#ifdef R_386_COPY
+        case R_386_COPY:
+            if (!resolvedOk) {
+                return false;
+            }
+            if (resolved != nullptr) {
+                std::memcpy(reinterpret_cast<void *>(target), resolved,
+                            image->symbols[symbolIndex].st_size);
+            }
+            return true;
+#endif
 #endif
         default:
             __android_log_print(ANDROID_LOG_WARN, kTag,
                                 "unsupported relocation %u in %s", type,
                                 image->name.c_str());
-            return;
+            return false;
     }
 }
 
-void applyRela(Image *image, uintptr_t base, ElfW(Addr) rela, size_t size,
+bool applyRela(Image *image, uintptr_t base, ElfW(Addr) rela, size_t size,
                size_t entrySize) {
     if (rela == 0 || size < entrySize || entrySize < sizeof(ElfW(Rela))) {
-        return;
+        return true;
     }
     auto *entries = reinterpret_cast<ElfW(Rela) *>(base + rela);
     size_t count = size / entrySize;
@@ -262,15 +366,18 @@ void applyRela(Image *image, uintptr_t base, ElfW(Addr) rela, size_t size,
         ElfW(Rela) &entry = entries[index];
         uint32_t symbolIndex = FM_R_SYM(entry.r_info);
         uint32_t type = FM_R_TYPE(entry.r_info);
-        applyRelocation(image, base, symbolIndex, type, entry.r_offset,
-                        static_cast<intptr_t>(entry.r_addend));
+        if (!applyRelocation(image, base, symbolIndex, type, entry.r_offset,
+                             static_cast<intptr_t>(entry.r_addend))) {
+            return false;
+        }
     }
+    return true;
 }
 
-void applyRel(Image *image, uintptr_t base, ElfW(Addr) rel, size_t size,
+bool applyRel(Image *image, uintptr_t base, ElfW(Addr) rel, size_t size,
               size_t entrySize) {
     if (rel == 0 || size < entrySize || entrySize < sizeof(ElfW(Rel))) {
-        return;
+        return true;
     }
     auto *entries = reinterpret_cast<ElfW(Rel) *>(base + rel);
     size_t count = size / entrySize;
@@ -280,9 +387,12 @@ void applyRel(Image *image, uintptr_t base, ElfW(Addr) rel, size_t size,
         uint32_t type = ELF32_R_TYPE(entry.r_info);
         uintptr_t addend = *reinterpret_cast<uintptr_t *>(
                 base + entry.r_offset);
-        applyRelocation(image, base, symbolIndex, type, entry.r_offset,
-                        static_cast<intptr_t>(addend));
+        if (!applyRelocation(image, base, symbolIndex, type, entry.r_offset,
+                             static_cast<intptr_t>(addend))) {
+            return false;
+        }
     }
+    return true;
 }
 
 void applyRelr(Image *image, uintptr_t base, ElfW(Addr) relr, size_t size) {
@@ -333,7 +443,12 @@ Image *load(const uint8_t *data, size_t size, const char *name) {
             || header->e_ident[EI_MAG1] != ELFMAG1
             || header->e_ident[EI_MAG2] != ELFMAG2
             || header->e_ident[EI_MAG3] != ELFMAG3
-            || header->e_ident[EI_CLASS] != ELFCLASS64
+            || header->e_ident[EI_CLASS] !=
+#if defined(__LP64__)
+                    ELFCLASS64
+#else
+                    ELFCLASS32
+#endif
             || header->e_ident[EI_DATA] != ELFDATA2LSB
             || header->e_type != ET_DYN) {
         return nullptr;
@@ -391,6 +506,16 @@ Image *load(const uint8_t *data, size_t size, const char *name) {
             break;
         }
     }
+#if defined(PT_GNU_RELRO)
+    for (int index = 0; index < header->e_phnum; index++) {
+        if (programs[index].p_type == PT_GNU_RELRO
+                && programs[index].p_memsz > 0) {
+            image->relroAddress = programs[index].p_vaddr;
+            image->relroSize = programs[index].p_memsz;
+            break;
+        }
+    }
+#endif
     auto *dynamic = dynamicVaddr == 0
             ? nullptr
             : reinterpret_cast<ElfW(Dyn) *>(baseAddress + dynamicVaddr);
@@ -404,15 +529,33 @@ Image *load(const uint8_t *data, size_t size, const char *name) {
         delete image;
         return nullptr;
     }
-    applyRela(image, baseAddress, dynamicValue(dynamic, DT_RELA),
-              dynamicValue(dynamic, DT_RELASZ),
-              dynamicValue(dynamic, DT_RELAENT, sizeof(ElfW(Rela))));
-    applyRela(image, baseAddress, dynamicValue(dynamic, DT_JMPREL),
-              dynamicValue(dynamic, DT_PLTRELSZ),
-              dynamicValue(dynamic, DT_RELAENT, sizeof(ElfW(Rela))));
-    applyRel(image, baseAddress, dynamicValue(dynamic, DT_REL),
-             dynamicValue(dynamic, DT_RELSZ),
-             dynamicValue(dynamic, DT_RELENT, sizeof(ElfW(Rel))));
+    bool relocated = true;
+    relocated = applyRela(image, baseAddress, dynamicValue(dynamic, DT_RELA),
+                          dynamicValue(dynamic, DT_RELASZ),
+                          dynamicValue(dynamic, DT_RELAENT,
+                                       sizeof(ElfW(Rela)))) && relocated;
+    if (dynamicValue(dynamic, DT_PLTREL) == DT_REL) {
+        relocated = applyRel(image, baseAddress,
+                             dynamicValue(dynamic, DT_JMPREL),
+                             dynamicValue(dynamic, DT_PLTRELSZ),
+                             dynamicValue(dynamic, DT_RELENT,
+                                          sizeof(ElfW(Rel)))) && relocated;
+    } else {
+        relocated = applyRela(image, baseAddress,
+                              dynamicValue(dynamic, DT_JMPREL),
+                              dynamicValue(dynamic, DT_PLTRELSZ),
+                              dynamicValue(dynamic, DT_RELAENT,
+                                           sizeof(ElfW(Rela)))) && relocated;
+    }
+    relocated = applyRel(image, baseAddress, dynamicValue(dynamic, DT_REL),
+                         dynamicValue(dynamic, DT_RELSZ),
+                         dynamicValue(dynamic, DT_RELENT,
+                                      sizeof(ElfW(Rel)))) && relocated;
+    if (!relocated) {
+        munmap(base, mappedSize);
+        delete image;
+        return nullptr;
+    }
 #if defined(DT_RELR)
     applyRelr(image, baseAddress, dynamicValue(dynamic, DT_RELR),
               dynamicValue(dynamic, DT_RELRSZ));
@@ -422,6 +565,12 @@ Image *load(const uint8_t *data, size_t size, const char *name) {
         uintptr_t end = alignUp(baseAddress + segment.address
                                 + segment.memorySize);
         mprotect(reinterpret_cast<void *>(start), end - start, segment.prot);
+    }
+    if (image->relroSize > 0) {
+        uintptr_t start = alignDown(baseAddress + image->relroAddress);
+        uintptr_t end = alignUp(baseAddress + image->relroAddress
+                                + image->relroSize);
+        mprotect(reinterpret_cast<void *>(start), end - start, PROT_READ);
     }
     uintptr_t init = dynamicValue(dynamic, DT_INIT);
     uintptr_t initArray = dynamicValue(dynamic, DT_INIT_ARRAY);

@@ -9,8 +9,8 @@ final class ShieldNativeFileHook {
     private ShieldNativeFileHook() {
     }
 
-    static int configure(String dataDir, boolean enforce) {
-        return nativeConfigure(dataDir, enforce);
+    static int configure(String dataDir, boolean enforce, String[] nativeLibs) {
+        return nativeConfigure(dataDir, enforce, nativeLibs);
     }
 
     static boolean installed() {
@@ -21,7 +21,8 @@ final class ShieldNativeFileHook {
         nativeSetBlockMode(mode);
     }
 
-    private static native int nativeConfigure(String dataDir, boolean enforce);
+    private static native int nativeConfigure(String dataDir, boolean enforce,
+                                               String[] nativeLibs);
 
     private static native boolean nativeInstalled();
 
