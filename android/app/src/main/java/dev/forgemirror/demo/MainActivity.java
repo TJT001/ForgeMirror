@@ -83,6 +83,7 @@ public class MainActivity extends AppCompatActivity {
                 + " dependency=" + nativeDependency() + " dlopen="
                 + nativeProbeDlopen() + " lockErr=" + lockErr
                 + " overload=" + nativeOverload("x") + "/" + nativeOverload(1);
+        Log.i(TAG, "probe " + probe);
         tv.setText(stringFromJNI() + "\n" + appStatus + "\n" + providerStatus
                 + "\n" + HarnessStorage.verify(this) + "\n" + probe);
     }

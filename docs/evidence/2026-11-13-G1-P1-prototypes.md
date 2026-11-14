@@ -61,7 +61,7 @@ Demo harness 的 `firstFrameMs` 包含 3 秒探针 sleep，不计入基线。
 | 锁语义 | `flock/fcntl` 已映射到真实目标 lock fd；同进程 POSIX fcntl 仍按内核语义不互斥 | 不覆盖直接 `svc`/`io_uring`；不与内部 `.lock` 声称互通 |
 | 系统调用 | 内联 `svc`、`io_uring` 未覆盖；`openat2.resolve` 未模拟 | 直接 syscall 可绕过透明 I/O |
 | ABI | x86/x86_64 无 ShadowHook 原生 hook；ARM32 未真机验证 | x86 透明 I/O/block 不可用 |
-| 加载器 | 已有 memfd + `android_dlopen_ext` 业务库 loader、DT_NEEDED 依赖预加载、dlopen 重定向、短/长符号 `RegisterNatives`、唯一占位库、JNI_OnLoad 临时文件回退、safejni 基础层 | 不是完整自研 linker；JNI_OnLoad/dlopen 回退有临时明文窗口；自定义 relocation/x86 hook 未覆盖 |
+| 加载器 | 已有自研 ELF64 loader（PT_LOAD/RELA/REL/RELR/符号/GNU hash/INIT）、DT_NEEDED 依赖预加载、dlopen 重定向、短/长符号注册、唯一占位库、JNI_OnLoad 临时文件回退、safejni 基础层 | TLS/IFUNC/COPY relocation、ARM32/x86 全 relocation 未覆盖；JNI_OnLoad/dlopen 回退有临时明文窗口 |
 | ART | 适配器为空实现，`VerifyClass` 未启用 | 当前无失败证据，符合 C4 约束 |
 | 构建 | 未处理 split APK/AAB、增量升级、16 KB page 对齐矩阵 | 需 P2/P4 扩展 |
 | 设备 | API 26–28、31+、国产 ROM 未覆盖 | G1 矩阵不足 |

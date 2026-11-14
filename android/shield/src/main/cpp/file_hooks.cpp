@@ -452,6 +452,22 @@ bool is_covered(const char *path) {
 bool app_native_caller() {
     Dl_info info{};
     void *address = shadowhook_get_return_address();
+    using contains_t = bool (*)(const void *);
+    static contains_t custom_contains = [] {
+        void *handle = dlopen("libshield_boot.so", RTLD_NOW | RTLD_NOLOAD);
+        if (handle != nullptr) {
+            auto function = reinterpret_cast<contains_t>(
+                    dlsym(handle, "fm_elf_contains_address"));
+            if (function != nullptr) {
+                return function;
+            }
+        }
+        return reinterpret_cast<contains_t>(
+                dlsym(RTLD_DEFAULT, "fm_elf_contains_address"));
+    }();
+    if (custom_contains != nullptr && custom_contains(address)) {
+        return true;
+    }
     if (dladdr(address, &info) == 0 || info.dli_fname == nullptr) {
         return false;
     }

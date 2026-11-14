@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "forgemirror/elf_loader.h"
 #include "forgemirror/safejni.h"
 
 namespace {
@@ -79,6 +80,19 @@ extern "C" JNIEXPORT jlong JNICALL
 Java_dev_forgemirror_shield_ShieldRuntime_nativeLoadInMemory(
         JNIEnv *env, jclass /* type */, jbyteArray bytes, jstring name,
         jboolean global) {
+    forgemirror::safejni::ByteArray data(env, bytes);
+    if (data.get() == nullptr || data.size() <= 0) {
+        forgemirror::safejni::clearException(env);
+        return 0;
+    }
+    forgemirror::safejni::Utf8String label(env, name);
+    forgemirror::elf::Image *image = forgemirror::elf::load(
+            reinterpret_cast<const uint8_t *>(data.get()),
+            static_cast<size_t>(data.size()),
+            label.get() == nullptr ? "fm-native" : label.get());
+    if (image != nullptr) {
+        return reinterpret_cast<jlong>(image);
+    }
     int flags = RTLD_NOW | (global == JNI_TRUE ? RTLD_GLOBAL : 0);
     return load_from_bytes(env, bytes, name, flags);
 }
@@ -108,7 +122,12 @@ Java_dev_forgemirror_shield_ShieldNativeLoader_nativeRegister(
         forgemirror::safejni::Utf8String symbolText(env, symbol);
         if (nameText.get() != nullptr && signatureText.get() != nullptr
                 && symbolText.get() != nullptr) {
-            void *address = dlsym(reinterpret_cast<void *>(handle), symbolText.get());
+            void *address = forgemirror::elf::is_image(
+                    reinterpret_cast<void *>(handle))
+                    ? forgemirror::elf::symbol(
+                            reinterpret_cast<forgemirror::elf::Image *>(handle),
+                            symbolText.get())
+                    : dlsym(reinterpret_cast<void *>(handle), symbolText.get());
             if (address != nullptr) {
                 JNINativeMethod method{
                         const_cast<char *>(nameText.get()),
