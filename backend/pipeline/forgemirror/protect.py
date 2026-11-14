@@ -96,6 +96,7 @@ class ProtectOptions:
     decoy_dynamic: bool = True
     corrupt_section_names: bool = True
     self_decrypt_text: bool = True
+    in_memory_libs: str = ""
 
 
 def _stub_from_aar(aar: Path, tools: AndroidTools, tmp: Path) -> tuple[bytes, dict[str, bytes]]:
@@ -143,6 +144,22 @@ def _core_key(k_content: bytes, build_id: str) -> bytes:
         salt=UUID(build_id).bytes,
         info=b"FM/core/v1",
     ).derive(k_content)
+
+
+def _native_key(k_content: bytes, build_id: str) -> bytes:
+    return HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=UUID(build_id).bytes,
+        info=b"FM/native/v1",
+    ).derive(k_content)
+
+
+def _encrypt_native(data: bytes, key: bytes) -> bytes:
+    magic = b"FMN1"
+    nonce = os.urandom(12)
+    ciphertext = AESGCM(key).encrypt(nonce, data, magic + nonce)
+    return magic + nonce + ciphertext
 
 
 def _encrypt_core(data: bytes, key: bytes) -> bytes:
@@ -290,6 +307,30 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
                     except Exception as error:
                         warnings.append(f"strip failed for {info.filename}: {error}")
 
+        native_assets: dict[str, bytes] = {}
+        selected = {name.strip() for name in options.in_memory_libs.split(",")
+                    if name.strip()}
+        if selected:
+            native_key = _native_key(k_content, options.build_id)
+            with zipfile.ZipFile(options.apk) as archive:
+                for info in archive.infolist():
+                    if not info.filename.startswith("lib/") or not info.filename.endswith(".so"):
+                        continue
+                    parts = info.filename.split("/")
+                    if len(parts) < 3:
+                        continue
+                    base = parts[-1]
+                    if base not in selected:
+                        continue
+                    data = stripped_libs.get(info.filename)
+                    if data is None:
+                        data = archive.read(info.filename)
+                    native_assets[
+                        f"assets/shield/native/{parts[1]}/{base}.enc"
+                    ] = _encrypt_native(data, native_key)
+                    drop_libs.add(info.filename)
+                    stripped_libs.pop(info.filename, None)
+
         config = {
             "schema": "forgemirror.shield.config/1",
             "original_application": original_application or "",
@@ -345,6 +386,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
         entries.update(stripped_libs)
         entries.update(shield_libs)
         entries.update(core_assets)
+        entries.update(native_assets)
 
         injected = tmp / "injected.apk"
         _rewrite_zip(options.apk, injected, entries, drop_libs)
@@ -358,6 +400,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             "assets/shield/trusted_key.der",
         }
         fixed.update(core_assets)
+        fixed.update(native_assets)
         if not options.no_key_asset:
             fixed.add("assets/shield/k_content.bin")
         artifacts = collect_artifacts(injected, fixed, all_libs=True)
@@ -406,6 +449,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
         "signing_mode": options.signing_mode,
         "signed": signed,
         "stripped_libs": len(stripped_libs),
+        "in_memory_libs": sorted(selected) if selected else [],
         "rule_count": len(DEFAULT_RULES["rules"]),
         "warnings": warnings,
         "signer_sha256": signer,

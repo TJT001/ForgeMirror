@@ -119,6 +119,10 @@ def protect_apk(
     self_decrypt_text: bool = typer.Option(
         True, "--self-decrypt-text/--no-self-decrypt-text"
     ),
+    in_memory_libs: str = typer.Option(
+        "", "--in-memory-libs",
+        help="Comma-separated customer .so basenames to load from encrypted assets.",
+    ),
     key_dir: Path = typer.Option(Path("artifacts/keys"), "--key-dir"),
     alg: str = typer.Option("ecdsa-p256-sha256", "--alg"),
     shell_version: str = typer.Option("0.1.0", "--shell-version"),
@@ -171,6 +175,7 @@ def protect_apk(
             decoy_dynamic=decoy_dynamic,
             corrupt_section_names=corrupt_section_names,
             self_decrypt_text=self_decrypt_text,
+            in_memory_libs=in_memory_libs,
             alg=alg,
         ),
         tools,

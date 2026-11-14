@@ -45,6 +45,7 @@ public final class ShieldRuntime {
     private static volatile ShieldPolicy policy;
     private static volatile ShieldRules rules;
     private static volatile byte[] fileKey;
+    private static volatile byte[] nativeKey;
     private static volatile boolean ruleScanStarted;
     private static final Map<String, ShieldSharedPreferences> PREFS = new HashMap<>();
 
@@ -96,6 +97,7 @@ public final class ShieldRuntime {
                     return state;
                 }
                 fileKey = ShieldPolicy.deriveFileKey(key, config.buildId);
+                nativeKey = ShieldPolicy.deriveNativeKey(key, config.buildId);
                 ShieldNativeIo.configure(context, config.maxNativeFileMb);
                 try {
                     int hookStatus = ShieldNativeFileHook.configure(
@@ -210,6 +212,12 @@ public final class ShieldRuntime {
     static boolean protects(String relPath) {
         ShieldPolicy active = policy;
         return active != null && active.encrypts(relPath);
+    }
+
+    static native long nativeLoadInMemory(byte[] elf, String name);
+
+    static byte[] nativeKey() {
+        return nativeKey;
     }
 
     static byte[] fileKey() {

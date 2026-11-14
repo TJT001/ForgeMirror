@@ -56,6 +56,11 @@ final class ShieldClassLoader extends BaseDexClassLoader {
     @Override
     public String findLibrary(String libName) {
         String mapped = System.mapLibraryName(libName);
+        String memory = ShieldNativeLoader.findLibrary(apkPath, abis, mapped,
+                ShieldRuntime.nativeKey(), this);
+        if (memory != null) {
+            return memory;
+        }
         try (ZipFile apk = new ZipFile(apkPath)) {
             for (String abi : abis) {
                 if (apk.getEntry("lib/" + abi + "/" + mapped) != null) {

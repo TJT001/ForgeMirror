@@ -25,6 +25,8 @@ final class ShieldPolicy {
             "FM/policy/v1".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
     private static final byte[] FILE_LABEL =
             "FM/files/v1".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+    private static final byte[] NATIVE_LABEL =
+            "FM/native/v1".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
 
     private final List<Pattern> rules = new ArrayList<>();
     private final List<Pattern> excludes = new ArrayList<>();
@@ -110,6 +112,10 @@ final class ShieldPolicy {
 
     static byte[] deriveFileKey(byte[] kContent, String buildId) throws Exception {
         return ShieldCrypto.hkdf(kContent, uuidBytes(buildId), FILE_LABEL);
+    }
+
+    static byte[] deriveNativeKey(byte[] kContent, String buildId) throws Exception {
+        return ShieldCrypto.hkdf(kContent, uuidBytes(buildId), NATIVE_LABEL);
     }
 
     boolean encrypts(String relPath) {

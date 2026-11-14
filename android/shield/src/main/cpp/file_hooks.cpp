@@ -405,7 +405,8 @@ bool is_covered(const char *path) {
 
 bool app_native_caller() {
     Dl_info info{};
-    if (dladdr(shadowhook_get_return_address(), &info) == 0 || info.dli_fname == nullptr) {
+    void *address = shadowhook_get_return_address();
+    if (dladdr(address, &info) == 0 || info.dli_fname == nullptr) {
         return false;
     }
     const char *name = info.dli_fname;
@@ -413,9 +414,15 @@ bool app_native_caller() {
         strstr(name, "libshadowhook") != nullptr) {
         return false;
     }
-    return strncmp(name, "/data/app/", 10) == 0 ||
-           strncmp(name, "/data/data/", 11) == 0 ||
-           strncmp(name, "/data/user/", 11) == 0;
+    if (strncmp(name, "/data/app/", 10) == 0 ||
+        strncmp(name, "/data/data/", 11) == 0 ||
+        strncmp(name, "/data/user/", 11) == 0 ||
+        strncmp(name, "/proc/self/fd/", 14) == 0 ||
+        strncmp(name, "/memfd:", 7) == 0) {
+        return true;
+    }
+    // Memfd-loaded libraries may be reported by a bare name (libfoo.so).
+    return name[0] != '/';
 }
 
 bool deny_now() {
