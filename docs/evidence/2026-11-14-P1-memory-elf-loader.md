@@ -77,6 +77,16 @@ files/harness_ra_renamed.txt magic: 46 4d 46 32 (FMF2)
 `libdemo2` 通过 `DT_NEEDED` 预加载，`dependency=7`；重载 native 方法短/长符号
 均注册成功（`overload=11/12`）。v2rayNG 默认保护回归 `bootstrap ok state=4`。
 
+ARM32（Pixel 5 / API 30，`adb install --abi armeabi-v7a` 强制 32 位安装）：
+
+```text
+ShieldHook: hook __loader_dlopen at 0xec5967d1 ok
+FMElf: loaded libdemo2.so base=0xe7fed000 size=8192
+FMElf: loaded libdemo.so base=0xb6d1f000 size=249856
+ShieldHook: dlopen redirect libdemo2.so
+MainActivity: probe ... dependency=7 dlopen=7 lockErr=0 overload=11/12
+```
+
 API 37（Android 16 / arm64 模拟器）同样验证了自研 loader：`libdemo2`、
 `libdemo` 均由 `FMElf` 加载，`dependency=7 dlopen=7 overload=11/12` 全通过。
 hook/ClassLoader 的 API 37 适配见 `2026-11-14-P1-api37-hooks.md`。
@@ -88,8 +98,9 @@ hook/ClassLoader 的 API 37 适配见 `2026-11-14-P1-api37-hooks.md`。
 1. 自研 loader 已覆盖 ELF64 ET_DYN 的 PT_LOAD、RELA/REL/RELR、`DT_PLTREL`、
    动态符号/GNU hash、INIT/INIT_ARRAY、RELRO、RELATIVE/ABS/GLOB_DAT/JUMP_SLOT/
    IRELATIVE/COPY；仍不支持 TLS relocation，其余未识别类型按失败处理并回退平台 linker。
-2. ELF32 的加载与 relocation 代码路径已实现，但尚未在 ARM32/x86 真机验证；
-   当前设备矩阵只证明 ARM64 自研路径，其他 ABI 仍以平台 fallback 为主。
+2. ELF32 路径已在 Pixel 5 / API 30 的 `armeabi-v7a` 安装上验证：`FMElf` 加载
+   libdemo2/libdemo，探针 `dependency=7 dlopen=7 lockErr=0 overload=11/12` 全通过；
+   x86/x86_64 尚未真机验证。
 3. 带 `JNI_OnLoad` 的主库回退到 cache 临时文件加载，保证 ClassLoader 上下文；
    文件在 10 秒后删除、启动时清理，存在短暂明文窗口。重载方法已按长符号注册。
    自研 loader 加载的依赖库会调用其 `JNI_OnLoad`（demo2 返回 65542 已验证）。
