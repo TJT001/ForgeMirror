@@ -249,8 +249,9 @@ def legacy_inspect(
     edata: Path | None = typer.Option(None, "--edata", exists=True, dir_okay=False),
     dve: Path | None = typer.Option(None, "--dve", exists=True, dir_okay=False),
     res_rule: Path | None = typer.Option(None, "--res-rule", exists=True, dir_okay=False),
+    info_y: Path | None = typer.Option(None, "--info-y", exists=True, dir_okay=False),
 ) -> None:
-    """Inspect SecNeo .edata, classes.dve, or RES_RULE material."""
+    """Inspect SecNeo .edata, classes.dve, RES_RULE, or INFO- material."""
     result: dict = {"ok": True}
     if edata is not None:
         parsed = parse_edata(edata.read_text())
@@ -264,8 +265,25 @@ def legacy_inspect(
         result["classes_dve"] = {"md5": stamp.md5, "ctime": stamp.ctime}
     if res_rule is not None:
         result["res_rule"] = decode_res_rule(res_rule.read_bytes())
-    if edata is None and dve is None and res_rule is None:
-        typer.echo("need --edata or --dve", err=True)
+    if info_y is not None:
+        from .formats.infoy import InfoYError, parse as parse_info_y
+
+        try:
+            parsed_info = parse_info_y(info_y.read_bytes())
+        except InfoYError as error:
+            typer.echo(f"info.y error: {error}", err=True)
+            raise typer.Exit(1) from error
+        result["info_y"] = {
+            "digest": parsed_info.digest.hex(),
+            "sections": [
+                {"index": section.index, "offset": section.offset,
+                 "flags": section.flags, "size": section.size}
+                for section in parsed_info.sections
+            ],
+            "strings": parsed_info.strings,
+        }
+    if edata is None and dve is None and res_rule is None and info_y is None:
+        typer.echo("need --edata, --dve, --res-rule or --info-y", err=True)
         raise typer.Exit(2)
     _echo(result)
 
