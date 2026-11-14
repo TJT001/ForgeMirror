@@ -6,7 +6,11 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *, void *) {
     return JNI_VERSION_1_6;
 }
 
+extern "C" int demo2_value() {
+    return 7;
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_dev_forgemirror_demo_MainActivity_nativeSecond(JNIEnv *, jobject) {
-    return 7;
+    return demo2_value();
 }

@@ -15,7 +15,7 @@ RAII 封装，供 native loader 使用。
 | 位置 | 内容 |
 |---|---|
 | `protect.py` | `--in-memory-libs libfoo.so,...`；HKDF `FM/native/v1` + AES-GCM（`FMN1`）加密选定业务库，写 assets 并从 APK 删除原 `lib/` 条目 |
-| `ShieldNativeLoader.java` | 按 ABI 读取加密 asset、派生 native key、解密、调用 `ShieldRuntime.nativeLoadInMemory`；从调用栈识别业务类并注册隐式 `Java_*` native 方法；带 `JNI_OnLoad` 的库回退临时文件以保留 ClassLoader 上下文 |
+| `ShieldNativeLoader.java` | 按 ABI 读取加密 asset、解析 `DT_NEEDED`、递归预加载加密依赖（`RTLD_GLOBAL`）、调用 `ShieldRuntime.nativeLoadInMemory`；从调用栈识别业务类并注册隐式 `Java_*` native 方法；带 `JNI_OnLoad` 的库回退临时文件以保留 ClassLoader 上下文 |
 | `native_loader.cpp` | `nativeLoadInMemory`：memfd 写入 → `android_dlopen_ext`；`nativeRegister`：按短/长符号 `dlsym` + `RegisterNatives` |
 | `safejni.h` | `LocalRef`、`Utf8String`、`ByteArray`、`findClass/staticMethod/method/toString`、异常清理 |
 | `ShieldClassLoader.findLibrary` | 优先使用加密 asset 的内存加载；不存在时回退 APK `lib/` |
@@ -58,13 +58,13 @@ ShieldNativeIo: open shadow fd=... merge_probe.txt
 readback prefs=true counter=1 file=true append=true ra=true
          mmap=true sqlite=true
 probe writeErr=0 readErr=0 mmapErr=0 syscallErr=0
-dupErr=0 javaDup=D2XYZ6 second=7 lockErr=0 overload=11/12
+dupErr=0 javaDup=D2XYZ6 dependency=7 overload=11/12 lockErr=0
 merge writeErr=0 closeErr=0 main=MAIN remote=REMOTE
 files/harness_ra_renamed.txt magic: 46 4d 46 32 (FMF2)
 ```
 
-无 `UnsatisfiedLinkError`，原生探针和透明 I/O 均正常；`JNI_OnLoad` 库走临时文件
-加载并成功执行 `DemoSecond: JNI_OnLoad from demo2`；重载 native 方法短/长符号
+无 `UnsatisfiedLinkError`，原生探针和透明 I/O 均正常；`libdemo` 的加密依赖
+`libdemo2` 通过 `DT_NEEDED` 预加载，`dependency=7`；重载 native 方法短/长符号
 均注册成功（`overload=11/12`）。v2rayNG 默认保护回归 `bootstrap ok state=4`。
 
 测试：Shield JVM 39 项、Python pipeline 66 项、Go 测试通过。
@@ -77,5 +77,6 @@ files/harness_ra_renamed.txt magic: 46 4d 46 32 (FMF2)
    文件在 10 秒后删除、启动时清理，存在短暂明文窗口。重载方法已按长符号注册。
 3. 占位路径按库名生成唯一 `libshield_holder_<hash>.so`；双库、JNI_OnLoad
    回退均已在 demo 验证；占位 ELF 的 SONAME 仍相同，极端 linker 行为需继续观察。
-4. 只处理显式选择的库；依赖库、`dlopen` 直连路径、x86 原生 hook 未覆盖。
+4. 已处理显式选择的库及其加密 `DT_NEEDED` 依赖；未拦截 `dlopen` 直连路径，
+   x86 原生 hook 仍未覆盖。
 5. `safejni` 目前是 header-only 基础层，尚未覆盖全部 JNI 引用类型和异常语义。

@@ -215,7 +215,7 @@ public final class ShieldRuntime {
         return active != null && active.encrypts(relPath);
     }
 
-    static native long nativeLoadInMemory(byte[] elf, String name);
+    static native long nativeLoadInMemory(byte[] elf, String name, boolean global);
 
     static byte[] nativeKey() {
         return nativeKey;

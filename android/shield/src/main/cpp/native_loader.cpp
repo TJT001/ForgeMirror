@@ -41,9 +41,8 @@ int create_memfd(const uint8_t *data, size_t size) {
 
 }  // namespace
 
-extern "C" JNIEXPORT jlong JNICALL
-Java_dev_forgemirror_shield_ShieldNativeLoader_nativeLoad(
-        JNIEnv *env, jclass /* type */, jbyteArray bytes, jstring name) {
+static jlong load_from_bytes(JNIEnv *env, jbyteArray bytes, jstring name,
+                             int dlopen_flags) {
     forgemirror::safejni::ByteArray data(env, bytes);
     if (data.get() == nullptr || data.size() <= 0) {
         forgemirror::safejni::clearException(env);
@@ -59,7 +58,8 @@ Java_dev_forgemirror_shield_ShieldNativeLoader_nativeLoad(
     info.flags = ANDROID_DLEXT_USE_LIBRARY_FD;
     info.library_fd = fd;
     void *handle = android_dlopen_ext(
-            label.get() == nullptr ? "fm-native" : label.get(), RTLD_NOW, &info);
+            label.get() == nullptr ? "fm-native" : label.get(),
+            dlopen_flags, &info);
     int error = handle == nullptr ? errno : 0;
     ::close(fd);
     if (handle == nullptr) {
@@ -70,10 +70,17 @@ Java_dev_forgemirror_shield_ShieldNativeLoader_nativeLoad(
 }
 
 extern "C" JNIEXPORT jlong JNICALL
-Java_dev_forgemirror_shield_ShieldRuntime_nativeLoadInMemory(
+Java_dev_forgemirror_shield_ShieldNativeLoader_nativeLoad(
         JNIEnv *env, jclass /* type */, jbyteArray bytes, jstring name) {
-    return Java_dev_forgemirror_shield_ShieldNativeLoader_nativeLoad(
-            env, nullptr, bytes, name);
+    return load_from_bytes(env, bytes, name, RTLD_NOW);
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_dev_forgemirror_shield_ShieldRuntime_nativeLoadInMemory(
+        JNIEnv *env, jclass /* type */, jbyteArray bytes, jstring name,
+        jboolean global) {
+    int flags = RTLD_NOW | (global == JNI_TRUE ? RTLD_GLOBAL : 0);
+    return load_from_bytes(env, bytes, name, flags);
 }
 
 extern "C" JNIEXPORT jint JNICALL

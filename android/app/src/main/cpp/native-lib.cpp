@@ -197,6 +197,13 @@ Java_dev_forgemirror_demo_MainActivity_nativeOverload__Ljava_lang_String_2(
     return 11;
 }
 
+extern "C" int demo2_value();
+
+extern "C" JNIEXPORT jint JNICALL
+Java_dev_forgemirror_demo_MainActivity_nativeDependency(JNIEnv *, jobject) {
+    return demo2_value();
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_dev_forgemirror_demo_MainActivity_nativeOverload__I(
         JNIEnv *, jobject, jint) {

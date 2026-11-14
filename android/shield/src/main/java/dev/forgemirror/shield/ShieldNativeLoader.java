@@ -7,6 +7,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -14,8 +16,10 @@ import java.util.Arrays;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -29,6 +33,7 @@ final class ShieldNativeLoader {
             "FM/native/v1".getBytes(StandardCharsets.US_ASCII);
     private static final String TAG = "ShieldNativeLoader";
     private static final Map<String, String> LOADED = new HashMap<>();
+    private static final Set<String> PRELOADED = new HashSet<>();
 
 
     private ShieldNativeLoader() {
@@ -54,6 +59,8 @@ final class ShieldNativeLoader {
                 }
                 byte[] blob = read(apk.getInputStream(entry));
                 byte[] elf = decrypt(blob, nativeKey);
+                preloadDependencies(apk, abis, elf, mapped, nativeKey,
+                        new HashSet<>());
                 String holder = "libshield_holder_" + hex(digest(mapped)) + ".so";
                 if (hasJniOnLoad(elf)) {
                     String path = writeTemporary(context, holder, elf);
@@ -63,7 +70,7 @@ final class ShieldNativeLoader {
                         return path;
                     }
                 }
-                long handle = ShieldRuntime.nativeLoadInMemory(elf, mapped);
+                long handle = ShieldRuntime.nativeLoadInMemory(elf, mapped, false);
                 if (handle == 0) {
                     continue;
                 }
@@ -80,6 +87,142 @@ final class ShieldNativeLoader {
             Log.w(TAG, "native asset load failed: " + error);
         }
         return null;
+    }
+
+    private static void preloadDependencies(ZipFile apk, String[] abis,
+                                            byte[] elf, String owner,
+                                            byte[] nativeKey, Set<String> stack) {
+        if (!stack.add(owner)) {
+            return;
+        }
+        for (String dependency : needed(elf)) {
+            if (dependency.equals(owner) || stack.contains(dependency)
+                    || ShieldRuntime.nativeKey() == null) {
+                continue;
+            }
+            String entry = findAsset(apk, abis, dependency);
+            if (entry == null) {
+                continue;
+            }
+            synchronized (PRELOADED) {
+                if (PRELOADED.contains(dependency)) {
+                    continue;
+                }
+                PRELOADED.add(dependency);
+            }
+            try {
+                byte[] dependencyElf = decrypt(read(apk.getInputStream(
+                        apk.getEntry(entry))), nativeKey);
+                preloadDependencies(apk, abis, dependencyElf, dependency,
+                        nativeKey, stack);
+                if (ShieldRuntime.nativeLoadInMemory(dependencyElf, dependency,
+                        true) == 0) {
+                    PRELOADED.remove(dependency);
+                }
+            } catch (Exception error) {
+                PRELOADED.remove(dependency);
+                Log.w(TAG, "dependency preload failed " + dependency + ": " + error);
+            }
+        }
+    }
+
+    private static String findAsset(ZipFile apk, String[] abis, String mapped) {
+        for (String abi : abis) {
+            String name = "assets/shield/native/" + abi + "/" + mapped + ".enc";
+            if (apk.getEntry(name) != null) {
+                return name;
+            }
+        }
+        return null;
+    }
+
+    private static List<String> needed(byte[] elf) {
+        List<String> result = new ArrayList<>();
+        if (elf == null || elf.length < 0x40 || elf[0] != 0x7f
+                || elf[1] != 'E' || elf[2] != 'L' || elf[3] != 'F') {
+            return result;
+        }
+        boolean is64 = elf[4] == 2;
+        ByteBuffer buffer = ByteBuffer.wrap(elf).order(ByteOrder.LITTLE_ENDIAN);
+        long phoff = is64 ? buffer.getLong(0x20)
+                : Integer.toUnsignedLong(buffer.getInt(0x1c));
+        int phentsize = Short.toUnsignedInt(
+                buffer.getShort(is64 ? 0x36 : 0x2a));
+        int phnum = Short.toUnsignedInt(buffer.getShort(is64 ? 0x38 : 0x2c));
+        List<long[]> loads = new ArrayList<>();
+        long dynamicOffset = -1;
+        long dynamicSize = 0;
+        for (int index = 0; index < phnum; index++) {
+            int position = (int) (phoff + (long) index * phentsize);
+            if (position < 0 || position + phentsize > elf.length) {
+                return result;
+            }
+            int type = buffer.getInt(position);
+            long offset;
+            long vaddr;
+            long filesz;
+            if (is64) {
+                offset = buffer.getLong(position + 8);
+                vaddr = buffer.getLong(position + 16);
+                filesz = buffer.getLong(position + 32);
+            } else {
+                offset = Integer.toUnsignedLong(buffer.getInt(position + 4));
+                vaddr = Integer.toUnsignedLong(buffer.getInt(position + 8));
+                filesz = Integer.toUnsignedLong(buffer.getInt(position + 16));
+            }
+            if (type == 1) {
+                loads.add(new long[]{offset, vaddr, filesz});
+            } else if (type == 2) {
+                dynamicOffset = offset;
+                dynamicSize = filesz;
+            }
+        }
+        if (dynamicOffset < 0 || dynamicSize <= 0) {
+            return result;
+        }
+        int entrySize = is64 ? 16 : 8;
+        long strtab = -1;
+        List<Integer> offsets = new ArrayList<>();
+        for (long position = dynamicOffset;
+             position + entrySize <= dynamicOffset + dynamicSize;
+             position += entrySize) {
+            int tag = buffer.getInt((int) position);
+            long value = is64 ? buffer.getLong((int) position + 8)
+                    : Integer.toUnsignedLong(buffer.getInt((int) position + 4));
+            if (tag == 0) {
+                break;
+            }
+            if (tag == 1) {
+                offsets.add((int) value);
+            } else if (tag == 5) {
+                strtab = value;
+            }
+        }
+        if (strtab < 0) {
+            return result;
+        }
+        long stringOffset = -1;
+        for (long[] load : loads) {
+            if (strtab >= load[1] && strtab < load[1] + load[2]) {
+                stringOffset = load[0] + (strtab - load[1]);
+                break;
+            }
+        }
+        if (stringOffset < 0) {
+            return result;
+        }
+        for (int relative : offsets) {
+            int start = (int) (stringOffset + relative);
+            if (start < 0 || start >= elf.length) {
+                continue;
+            }
+            int end = start;
+            while (end < elf.length && elf[end] != 0) {
+                end++;
+            }
+            result.add(new String(elf, start, end - start, StandardCharsets.UTF_8));
+        }
+        return result;
     }
 
     static void cleanup(Context context) {
