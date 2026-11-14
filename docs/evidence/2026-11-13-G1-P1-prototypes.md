@@ -33,11 +33,11 @@
 |---|---|---|---|
 | Pixel 5 | 30 / arm64-v8a | 通过 | demo 探针、v2rayNG 2.4.0、DT_INIT LZSS、诱饵、透明 I/O |
 | Android 构建 | x86 / x86_64 | 仅编译通过 | ShadowHook/x86 原生 hook 未运行验证 |
-| Android 构建 | armeabi-v7a | 仅编译通过 | ARM32 内联 cacheflush 已编译，未真机验证 |
+| Pixel 5 | API 30 / armeabi-v7a | 通过 | 强制 32 位安装；ELF32 自研 loader、hook、dlopen 重定向、探针全通过 |
 | API 26–28 | — | 未验证 | `ShieldInstrumentation` 路径未经真机 |
-| API 31+ / 35–37 | — | 未验证 | targetSdk 37 包可在 API 30 运行，反向未覆盖 |
+| API 37（Android 16） | arm64-v8a 模拟器 | 通过 | 默认保护/内存库探针全通过；`2026-11-14-P1-api37-hooks.md` |
 
-结论：**G1 设备矩阵只完成 1 台真机 + 第三方应用样本，未达到多 ROM/多 API 覆盖。**
+结论：**已覆盖 Pixel 5 API 30（arm64 + armeabi-v7a）与 API 37 arm64 模拟器；API 26–28、x86/x86_64、国产 ROM 仍未覆盖。**
 
 ## 启动基线（Pixel 5 / API 30）
 
@@ -60,10 +60,10 @@ Demo harness 的 `firstFrameMs` 包含 3 秒探针 sleep，不计入基线。
 | 并发 | 跨进程已做分块三方合并；同块冲突 local-wins，块级非字节级；多写者仍由文件锁串行应用 WAL | 同块并发修改会丢弃远端版本；无分布式锁 |
 | 锁语义 | `flock/fcntl` 已映射到真实目标 lock fd；同进程 POSIX fcntl 仍按内核语义不互斥 | 不覆盖直接 `svc`/`io_uring`；不与内部 `.lock` 声称互通 |
 | 系统调用 | 内联 `svc`、`io_uring` 未覆盖；`openat2.resolve` 未模拟 | 直接 syscall 可绕过透明 I/O |
-| ABI | x86/x86_64 无 ShadowHook 原生 hook；ARM32 未真机验证 | x86 透明 I/O/block 不可用 |
-| 加载器 | 已有自研 ELF64 loader（PT_LOAD/RELA/REL/RELR/符号/GNU hash/INIT）、DT_NEEDED 依赖预加载、dlopen 重定向、短/长符号注册、唯一占位库、JNI_OnLoad 临时文件回退、safejni 基础层 | TLS/IFUNC/COPY relocation、ARM32/x86 全 relocation 未覆盖；JNI_OnLoad/dlopen 回退有临时明文窗口 |
-| ART | 适配器为空实现，`VerifyClass` 未启用 | 当前无失败证据，符合 C4 约束 |
-| 构建 | 未处理 split APK/AAB、增量升级、16 KB page 对齐矩阵 | 需 P2/P4 扩展 |
+| ABI | ARM32 已在 Pixel 5/API 30 验证；x86/x86_64 无真机，仅编译通过 | x86 透明 I/O/block 未验证 |
+| 加载器 | 自研 ELF64/ELF32 loader（PT_LOAD/RELA/REL/RELR/DT_PLTREL/符号/GNU hash/INIT/RELRO/IRELATIVE/COPY）、DT_NEEDED 预加载与平台兜底、依赖 JNI_OnLoad、dlopen 重定向、唯一占位库、fail-closed 回退、safejni | TLS relocation、x86 真机未覆盖；JNI_OnLoad/dlopen 回退有短暂明文窗口 |
+| ART | 适配器为空实现；直接 hook `ClassLinker::VerifyClass` 返回 true 在 API 30 触发 ART SIGABRT，已回退 | 需要安全的 class status 方案；当前无绕过证据，符合 C4 |
+| 构建 | 未处理 split APK/AAB、增量升级；16 KB 页未真机验证 | 需 P2/P4 扩展 |
 | 设备 | API 26–28、31+、国产 ROM 未覆盖 | G1 矩阵不足 |
 
 ## 下一步建议
