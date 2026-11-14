@@ -192,6 +192,18 @@ Java_dev_forgemirror_demo_MainActivity_nativeProbeClose(
 }
 
 extern "C" JNIEXPORT jint JNICALL
+Java_dev_forgemirror_demo_MainActivity_nativeOverload__Ljava_lang_String_2(
+        JNIEnv *, jobject, jstring) {
+    return 11;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_dev_forgemirror_demo_MainActivity_nativeOverload__I(
+        JNIEnv *, jobject, jint) {
+    return 12;
+}
+
+extern "C" JNIEXPORT jint JNICALL
 Java_dev_forgemirror_demo_MainActivity_nativeProbeLock(
         JNIEnv* env,
         jobject /* this */,

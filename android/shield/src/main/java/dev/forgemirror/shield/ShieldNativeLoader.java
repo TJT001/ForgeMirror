@@ -1,8 +1,11 @@
 package dev.forgemirror.shield;
 
+import android.content.Context;
 import android.util.Log;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -31,9 +34,9 @@ final class ShieldNativeLoader {
     private ShieldNativeLoader() {
     }
 
-    static synchronized String findLibrary(String apkPath, String[] abis,
-                                           String mapped, byte[] nativeKey,
-                                           ClassLoader loader) {
+    static synchronized String findLibrary(Context context, String apkPath,
+                                           String[] abis, String mapped,
+                                           byte[] nativeKey, ClassLoader loader) {
         if (nativeKey == null || apkPath == null || mapped == null) {
             return null;
         }
@@ -51,12 +54,20 @@ final class ShieldNativeLoader {
                 }
                 byte[] blob = read(apk.getInputStream(entry));
                 byte[] elf = decrypt(blob, nativeKey);
+                String holder = "libshield_holder_" + hex(digest(mapped)) + ".so";
+                if (hasJniOnLoad(elf)) {
+                    String path = writeTemporary(context, holder, elf);
+                    if (path != null) {
+                        LOADED.put(cacheKey, path);
+                        Log.i(TAG, "loaded from temporary file " + mapped);
+                        return path;
+                    }
+                }
                 long handle = ShieldRuntime.nativeLoadInMemory(elf, mapped);
                 if (handle == 0) {
                     continue;
                 }
                 registerNatives(callerClass(loader), handle);
-                String holder = "libshield_holder_" + hex(digest(mapped)) + ".so";
                 String path = apkPath + "!/lib/" + abi + "/" + holder;
                 if (apk.getEntry("lib/" + abi + "/" + holder) == null) {
                     path = apkPath + "!/lib/" + abi + "/libshield_dummy.so";
@@ -69,6 +80,58 @@ final class ShieldNativeLoader {
             Log.w(TAG, "native asset load failed: " + error);
         }
         return null;
+    }
+
+    static void cleanup(Context context) {
+        File directory = new File(context.getCacheDir(), "shield-native");
+        File[] files = directory.listFiles();
+        if (files == null) {
+            return;
+        }
+        for (File file : files) {
+            //noinspection ResultOfMethodCallIgnored
+            file.delete();
+        }
+    }
+
+    private static boolean hasJniOnLoad(byte[] elf) {
+        byte[] needle = {'J', 'N', 'I', '_', 'O', 'n', 'L', 'o', 'a', 'd'};
+        outer:
+        for (int index = 0; index <= elf.length - needle.length; index++) {
+            for (int cursor = 0; cursor < needle.length; cursor++) {
+                if (elf[index + cursor] != needle[cursor]) {
+                    continue outer;
+                }
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private static String writeTemporary(Context context, String name, byte[] elf) {
+        File directory = new File(context.getCacheDir(), "shield-native");
+        if (!directory.isDirectory() && !directory.mkdirs()) {
+            return null;
+        }
+        File target = new File(directory, name);
+        try (FileOutputStream output = new FileOutputStream(target)) {
+            output.write(elf);
+            output.getFD().sync();
+        } catch (Exception error) {
+            Log.w(TAG, "temporary native write failed: " + error);
+            return null;
+        }
+        final File remove = target;
+        new Thread(() -> {
+            try {
+                Thread.sleep(10000);
+            } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+            }
+            //noinspection ResultOfMethodCallIgnored
+            remove.delete();
+        }, "shield-native-cleanup").start();
+        return target.getAbsolutePath();
     }
 
     private static Class<?> callerClass(ClassLoader loader) {
@@ -96,15 +159,18 @@ final class ShieldNativeLoader {
         List<String> names = new ArrayList<>();
         List<String> signatures = new ArrayList<>();
         List<String> symbols = new ArrayList<>();
+        List<String> longSymbols = new ArrayList<>();
         for (Method method : type.getDeclaredMethods()) {
             if (!Modifier.isNative(method.getModifiers())) {
                 continue;
             }
             String signature = signature(method);
+            String base = "Java_" + mangle(type.getName().replace('.', '/'))
+                    + "_" + mangle(method.getName());
             names.add(method.getName());
             signatures.add(signature);
-            symbols.add("Java_" + mangle(type.getName().replace('.', '/'))
-                    + "_" + mangle(method.getName()));
+            symbols.add(base);
+            longSymbols.add(base + "__" + mangle(arguments(method)));
         }
         if (names.isEmpty()) {
             return;
@@ -112,6 +178,17 @@ final class ShieldNativeLoader {
         nativeRegister(type, names.toArray(new String[0]),
                 signatures.toArray(new String[0]),
                 symbols.toArray(new String[0]), handle);
+        nativeRegister(type, names.toArray(new String[0]),
+                signatures.toArray(new String[0]),
+                longSymbols.toArray(new String[0]), handle);
+    }
+
+    private static String arguments(Method method) {
+        StringBuilder result = new StringBuilder();
+        for (Class<?> parameter : method.getParameterTypes()) {
+            result.append(descriptor(parameter));
+        }
+        return result.toString();
     }
 
     private static String signature(Method method) {

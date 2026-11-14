@@ -21,11 +21,13 @@ import dalvik.system.BaseDexClassLoader;
  * stock InMemoryDexClassLoader cannot resolve.
  */
 final class ShieldClassLoader extends BaseDexClassLoader {
+    private final Context context;
     private final String apkPath;
     private final String[] abis;
 
     ShieldClassLoader(ByteBuffer[] dexBuffers, ClassLoader parent, Context context) {
         super("", null, null, parent);
+        this.context = context;
         this.apkPath = context.getApplicationInfo().sourceDir;
         this.abis = Build.SUPPORTED_ABIS;
         installDexElements(dexBuffers);
@@ -56,8 +58,8 @@ final class ShieldClassLoader extends BaseDexClassLoader {
     @Override
     public String findLibrary(String libName) {
         String mapped = System.mapLibraryName(libName);
-        String memory = ShieldNativeLoader.findLibrary(apkPath, abis, mapped,
-                ShieldRuntime.nativeKey(), this);
+        String memory = ShieldNativeLoader.findLibrary(context, apkPath, abis,
+                mapped, ShieldRuntime.nativeKey(), this);
         if (memory != null) {
             return memory;
         }

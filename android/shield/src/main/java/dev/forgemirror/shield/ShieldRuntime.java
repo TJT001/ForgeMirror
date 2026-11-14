@@ -57,6 +57,7 @@ public final class ShieldRuntime {
     }
 
     public static synchronized int bootstrap(Context context) {
+        ShieldNativeLoader.cleanup(context);
         ShieldMetrics.start();
         if (context == null) {
             fail("bootstrap without context");
