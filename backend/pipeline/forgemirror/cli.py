@@ -309,7 +309,7 @@ def yara_check(
     """Compile YARA rules (default: the nine demo rules)."""
     from .formats import yara_rules
 
-    source = rules_file.read_text() if rules_file else yara_rules.NINE_RULES
+    source = rules_file.read_text() if rules_file else yara_rules.PRODUCT_RULES
     try:
         yara_rules.compile_rules(source)
     except (yara_rules.YaraUnavailable, yara_rules.YaraRuleError) as error:
@@ -326,7 +326,7 @@ def yara_scan(
     """Scan an APK's native libraries with YARA rules."""
     from .formats import yara_rules
 
-    source = rules_file.read_text() if rules_file else yara_rules.NINE_RULES
+    source = rules_file.read_text() if rules_file else yara_rules.PRODUCT_RULES
     try:
         matches = yara_rules.scan_apk(apk, source=source)
     except (yara_rules.YaraUnavailable, yara_rules.YaraRuleError) as error:

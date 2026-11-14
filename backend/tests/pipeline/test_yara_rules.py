@@ -22,6 +22,7 @@ POSITIVE = {
     "fm_dex_memory_loading": b"InMemoryDexClassLoader makeInMemoryDexElements",
     "fm_signature_tamper": b"GET_SIGNATURES signatures",
     "fm_network_interception": b"tcpdump",
+    "fm_unpack_framework": b"dumpArtMethod",
 }
 
 MISSING_FEATURE = {
@@ -37,8 +38,8 @@ class YaraRuleTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.rules = yara_rules.compile_rules()
 
-    def test_nine_rules_compile(self) -> None:
-        self.assertEqual(yara_rules.NINE_RULES.count("rule fm_"), 9)
+    def test_product_rules_compile(self) -> None:
+        self.assertEqual(yara_rules.PRODUCT_RULES.count("rule fm_"), 10)
 
     def test_each_rule_matches_positive_sample(self) -> None:
         for rule, payload in POSITIVE.items():

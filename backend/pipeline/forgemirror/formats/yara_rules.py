@@ -1,7 +1,7 @@
 """YARA-backed rule compilation and APK scanning.
 
-The nine rules below are independently written demo rules for semantics and
-regression testing, not the research-side nine-rule corpus. Runtime shell
+The product rules below are independently written demo rules for semantics
+and regression testing, not the research-side nine-rule corpus. Runtime shell
 integration still uses PKR1 string rules; this module is the host-side engine
 used to validate rule semantics and scan artifacts.
 """
@@ -27,7 +27,7 @@ class YaraRuleError(Exception):
     pass
 
 
-NINE_RULES = r"""
+PRODUCT_RULES = r"""
 rule fm_dynamic_instrumentation
 {
     meta:
@@ -150,10 +150,27 @@ rule fm_network_interception
     condition:
         any of them
 }
+
+rule fm_unpack_framework
+{
+    meta:
+        id = "fm_unpack_framework"
+        severity = "high"
+    strings:
+        $a1 = "youpk" ascii wide nocase
+        $a2 = "fupk3" ascii wide nocase
+        $a3 = "yarfahook" ascii wide nocase
+        $a4 = "dumpArtMethod" ascii
+        $a5 = "dumpdexfilebyArtMethod" ascii
+        $a6 = "shouldUnpack" ascii
+        $a7 = "myfartInvoke" ascii
+    condition:
+        any of them
+}
 """
 
 # Demo-only rule used by the protected harness to prove the runtime engine is
-# live. It is not part of the nine product rule set.
+# live. It is not part of the product rule set.
 DEMO_RULE = r"""
 rule fm_demo_jni
 {
@@ -167,7 +184,7 @@ rule fm_demo_jni
 }
 """
 
-RUNTIME_RULES = NINE_RULES + DEMO_RULE
+RUNTIME_RULES = PRODUCT_RULES + DEMO_RULE
 
 
 @dataclass
@@ -184,7 +201,7 @@ def ensure_available() -> None:
         )
 
 
-def compile_rules(source: str = NINE_RULES):
+def compile_rules(source: str = PRODUCT_RULES):
     ensure_available()
     try:
         return yara.compile(source=source)
@@ -205,7 +222,7 @@ def scan_file(path: Path, rules) -> list[str]:
         raise YaraRuleError(str(error)) from error
 
 
-def scan_apk(apk: Path, rules=None, source: str = NINE_RULES) -> list[YaraMatch]:
+def scan_apk(apk: Path, rules=None, source: str = PRODUCT_RULES) -> list[YaraMatch]:
     engine = rules if rules is not None else compile_rules(source)
     matches: list[YaraMatch] = []
     with zipfile.ZipFile(apk) as archive:
