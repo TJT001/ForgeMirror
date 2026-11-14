@@ -80,7 +80,8 @@ public class MainActivity extends AppCompatActivity {
                 + " java=" + javaText + " mmapWriteErr=" + mmapWriteErr
                 + " javaMmap=" + javaMmap + " periodic=" + periodic
                 + " dupErr=" + dupWriteErr + " javaDup=" + javaDup
-                + " dependency=" + nativeDependency() + " lockErr=" + lockErr
+                + " dependency=" + nativeDependency() + " dlopen="
+                + nativeProbeDlopen() + " lockErr=" + lockErr
                 + " overload=" + nativeOverload("x") + "/" + nativeOverload(1);
         tv.setText(stringFromJNI() + "\n" + appStatus + "\n" + providerStatus
                 + "\n" + HarnessStorage.verify(this) + "\n" + probe);
@@ -157,6 +158,8 @@ public class MainActivity extends AppCompatActivity {
     public native String stringFromJNI();
 
     public native int nativeDependency();
+
+    public native int nativeProbeDlopen();
 
     public native int nativeOverload(String value);
 

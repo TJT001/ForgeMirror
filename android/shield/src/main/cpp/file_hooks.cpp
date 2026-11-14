@@ -1,4 +1,5 @@
 #include <android/log.h>
+#include <android/dlext.h>
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <jni.h>
@@ -45,6 +46,7 @@ jmethodID gIoSync = nullptr;
 jmethodID gIoProtected = nullptr;
 jmethodID gIoRememberDup = nullptr;
 jmethodID gIoForgetDup = nullptr;
+jmethodID gIoNativePath = nullptr;
 __thread bool gInternal = false;
 std::mutex gShadowLock;
 std::unordered_set<int> gShadowFds;
@@ -84,6 +86,7 @@ using dup2_t = int (*)(int, int);
 using dup3_t = int (*)(int, int, int);
 using flock_t = int (*)(int, int);
 using fcntl_t = int (*)(int, int, ...);
+using dlopen_t = void *(*)(const char *, int);
 using rename_t = int (*)(const char *, const char *);
 using renameat_t = int (*)(int, const char *, int, const char *);
 using unlink_t = int (*)(const char *);
@@ -115,6 +118,7 @@ dup2_t g_dup2 = nullptr;
 dup3_t g_dup3 = nullptr;
 flock_t g_flock = nullptr;
 __attribute__((unused)) fcntl_t g_fcntl = nullptr;
+dlopen_t g_dlopen = nullptr;
 rename_t g_rename = nullptr;
 renameat_t g_renameat = nullptr;
 unlink_t g_unlink = nullptr;
@@ -269,6 +273,48 @@ bool java_is_protected(const char *path) {
     if (env->ExceptionCheck()) {
         env->ExceptionClear();
         result = true;
+    }
+    gInternal = false;
+    if (attached) {
+        gVm->DetachCurrentThread();
+    }
+    return result;
+}
+
+std::string java_native_path(const char *name) {
+    if (gVm == nullptr || gIoClass == nullptr || gIoNativePath == nullptr) {
+        return {};
+    }
+    JNIEnv *env = nullptr;
+    bool attached = false;
+    jint status = gVm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if (gVm->AttachCurrentThread(&env, nullptr) != JNI_OK) {
+            return {};
+        }
+        attached = true;
+    } else if (status != JNI_OK) {
+        return {};
+    }
+    gInternal = true;
+    std::string result;
+    jstring target = env->NewStringUTF(name);
+    if (target != nullptr) {
+        jstring value = static_cast<jstring>(
+                env->CallStaticObjectMethod(gIoClass, gIoNativePath, target));
+        if (value != nullptr) {
+            const char *chars = env->GetStringUTFChars(value, nullptr);
+            if (chars != nullptr) {
+                result = chars;
+                env->ReleaseStringUTFChars(value, chars);
+            }
+            env->DeleteLocalRef(value);
+        }
+        env->DeleteLocalRef(target);
+    }
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        result.clear();
     }
     gInternal = false;
     if (attached) {
@@ -1032,6 +1078,21 @@ ssize_t proxy_writev(int fd, const struct iovec *iov, int count) {
     return result;
 }
 
+void *proxy_dlopen(const char *filename, int flags) {
+    SHADOWHOOK_STACK_SCOPE();
+    auto prev = (dlopen_t) shadowhook_get_prev_func((void *) &proxy_dlopen);
+    if (gInternal || filename == nullptr) {
+        return prev != nullptr ? prev(filename, flags) : nullptr;
+    }
+    const char *slash = strrchr(filename, '/');
+    const char *base = slash == nullptr ? filename : slash + 1;
+    std::string path = java_native_path(base);
+    if (!path.empty() && prev != nullptr) {
+        return prev(path.c_str(), flags);
+    }
+    return prev != nullptr ? prev(filename, flags) : nullptr;
+}
+
 int proxy_dup(int oldfd) {
     SHADOWHOOK_STACK_SCOPE();
     auto prev = (dup_t) shadowhook_get_prev_func((void *) &proxy_dup);
@@ -1375,6 +1436,23 @@ void install() {
     hook("dup", reinterpret_cast<void *>(&proxy_dup), &g_dup);
     hook("dup2", reinterpret_cast<void *>(&proxy_dup2), &g_dup2);
     hook("dup3", reinterpret_cast<void *>(&proxy_dup3), &g_dup3);
+    {
+        const char *dllibs[] = {
+            "libdl.so",
+            "/system/lib64/libdl.so",
+            "/system/lib/libdl.so",
+            "/apex/com.android.runtime/lib64/bionic/libdl.so",
+            "/apex/com.android.runtime/lib/bionic/libdl.so",
+        };
+        int installed = 0;
+        for (const char *lib : dllibs) {
+            installed += hook_one<dlopen_t>(lib, "dlopen",
+                    reinterpret_cast<void *>(&proxy_dlopen), &g_dlopen);
+        }
+        if (installed == 0) {
+            hook("dlopen", reinterpret_cast<void *>(&proxy_dlopen), &g_dlopen);
+        }
+    }
     hook("flock", reinterpret_cast<void *>(&proxy_flock), &g_flock);
     hook("fcntl", reinterpret_cast<void *>(&proxy_fcntl), &g_fcntl);
     hook("rename", reinterpret_cast<void *>(&proxy_rename), &g_rename);
@@ -1448,9 +1526,12 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
         gIoRememberDup = env->GetStaticMethodID(
                 gIoClass, "rememberDup", "(II)V");
         gIoForgetDup = env->GetStaticMethodID(gIoClass, "forgetDup", "(I)V");
+        gIoNativePath = env->GetStaticMethodID(
+                gIoClass, "openNativePath",
+                "(Ljava/lang/String;)Ljava/lang/String;");
         if (gIoOpen == nullptr || gIoSync == nullptr ||
             gIoProtected == nullptr || gIoRememberDup == nullptr ||
-            gIoForgetDup == nullptr) {
+            gIoForgetDup == nullptr || gIoNativePath == nullptr) {
             env->ExceptionClear();
         }
         env->DeleteLocalRef(type);

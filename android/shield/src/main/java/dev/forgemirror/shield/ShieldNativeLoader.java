@@ -89,6 +89,30 @@ final class ShieldNativeLoader {
         return null;
     }
 
+    static synchronized String openNativePath(Context context, String mapped) {
+        byte[] nativeKey = ShieldRuntime.nativeKey();
+        if (context == null || mapped == null || nativeKey == null) {
+            return null;
+        }
+        String apkPath = context.getApplicationInfo().sourceDir;
+        String[] abis = android.os.Build.SUPPORTED_ABIS;
+        try (ZipFile apk = new ZipFile(apkPath)) {
+            String entry = findAsset(apk, abis, mapped);
+            if (entry == null) {
+                return null;
+            }
+            byte[] blob = read(apk.getInputStream(apk.getEntry(entry)));
+            byte[] elf = decrypt(blob, nativeKey);
+            preloadDependencies(apk, abis, elf, mapped, nativeKey,
+                    new HashSet<>());
+            String holder = "libshield_holder_" + hex(digest(mapped)) + ".so";
+            return writeTemporary(context, holder, elf);
+        } catch (Exception error) {
+            Log.w(TAG, "openNativePath failed " + mapped + ": " + error);
+            return null;
+        }
+    }
+
     private static void preloadDependencies(ZipFile apk, String[] abis,
                                             byte[] elf, String owner,
                                             byte[] nativeKey, Set<String> stack) {

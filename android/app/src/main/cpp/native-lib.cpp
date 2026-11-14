@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <string>
 
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/file.h>
@@ -198,6 +199,22 @@ Java_dev_forgemirror_demo_MainActivity_nativeOverload__Ljava_lang_String_2(
 }
 
 extern "C" int demo2_value();
+
+extern "C" JNIEXPORT jint JNICALL
+Java_dev_forgemirror_demo_MainActivity_nativeProbeDlopen(JNIEnv *, jobject) {
+    void *handle = dlopen("libdemo2.so", RTLD_NOW);
+    if (handle == nullptr) {
+        return -1;
+    }
+    auto function = reinterpret_cast<int (*)()>(dlsym(handle, "demo2_value"));
+    if (function == nullptr) {
+        dlclose(handle);
+        return -2;
+    }
+    int value = function();
+    dlclose(handle);
+    return value;
+}
 
 extern "C" JNIEXPORT jint JNICALL
 Java_dev_forgemirror_demo_MainActivity_nativeDependency(JNIEnv *, jobject) {

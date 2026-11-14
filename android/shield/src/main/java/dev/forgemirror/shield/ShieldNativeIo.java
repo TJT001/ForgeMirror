@@ -96,6 +96,13 @@ final class ShieldNativeIo {
         }
     }
 
+    static String openNativePath(String name) {
+        if (appContext == null || name == null) {
+            return null;
+        }
+        return ShieldNativeLoader.openNativePath(appContext, name);
+    }
+
     static boolean protectedPath(String path) {
         if (appContext == null || path == null) {
             return false;
