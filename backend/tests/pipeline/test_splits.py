@@ -268,6 +268,7 @@ class ProtectSplitTests(unittest.TestCase):
                 archive.writestr("AndroidManifest.xml", b"split")
                 archive.writestr("classes.dex", b"dex\n035\x00" + b"\x03" * 64)
                 archive.writestr("lib/arm64-v8a/libdemo2.so", ELF_ARM64)
+                archive.writestr("lib/arm64-v8a/libshield_core.so", ELF_ARM64)
 
             key = b"\x22" * 32
             key_file = tmp / "k.bin"
@@ -307,6 +308,7 @@ class ProtectSplitTests(unittest.TestCase):
                 split_names = set(archive.namelist())
             self.assertNotIn("classes.dex", split_names)
             self.assertNotIn("lib/arm64-v8a/libdemo2.so", split_names)
+            self.assertNotIn("lib/arm64-v8a/libshield_core.so", split_names)
 
             payload = json.loads(base64.b64decode(envelope["payload"]))
             self.assertEqual(payload["splits"][0]["file"], split.name)

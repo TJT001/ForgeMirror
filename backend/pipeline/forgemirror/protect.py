@@ -313,6 +313,18 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
         split_drops: dict[Path, set[str]] = {
             split: set() for split in options.splits
         }
+        shield_names = {
+            "libshield_boot.so", "libshield_core.so", "libshield_hook.so",
+            "libshield_yara.so", "libshield_dummy.so", "libshadowhook.so",
+            "libshadowhook_nothing.so",
+        }
+        for split in options.splits:
+            with zipfile.ZipFile(split) as archive:
+                for info in archive.infolist():
+                    base_name = Path(info.filename).name
+                    if base_name in shield_names or base_name.startswith(
+                            "libshield_holder_"):
+                        split_drops[split].add(info.filename)
         stripped_count = 0
         if options.strip_customer_libs:
             for source in sources:
@@ -321,7 +333,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
                     for info in archive.infolist():
                         if not info.filename.startswith("lib/") or not info.filename.endswith(".so"):
                             continue
-                        if info.filename.endswith(("libshield_boot.so", "libshield_core.so")):
+                        if Path(info.filename).name in shield_names:
                             continue
                         try:
                             target[info.filename] = tools.strip_so(

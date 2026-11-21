@@ -67,6 +67,11 @@ def build(
                                      help="Repeatable split APK belonging to the base APK."),
     bundletool: Path | None = typer.Option(None, "--bundletool",
                                            help="bundletool executable or standalone jar."),
+    aab_mode: str = typer.Option("universal", "--aab-mode",
+                                 help="AAB conversion mode: universal or split."),
+    device_spec: Path | None = typer.Option(None, "--device-spec", exists=True,
+                                            dir_okay=False,
+                                            help="bundletool device spec for --aab-mode=split."),
 ) -> None:
     """Run S0 -> S1 -> S2 and write the build artifacts."""
     if profile not in PROFILES:
@@ -90,6 +95,8 @@ def build(
             key_file=key_file,
             splits=split,
             bundletool=bundletool,
+            aab_mode=aab_mode,
+            device_spec=device_spec,
         ),
         tools,
     )
@@ -138,6 +145,11 @@ def protect_apk(
                                      help="Repeatable split APK belonging to the base APK."),
     bundletool: Path | None = typer.Option(None, "--bundletool",
                                            help="bundletool executable or standalone jar."),
+    aab_mode: str = typer.Option("universal", "--aab-mode",
+                                 help="AAB conversion mode: universal or split."),
+    device_spec: Path | None = typer.Option(None, "--device-spec", exists=True,
+                                            dir_okay=False,
+                                            help="bundletool device spec for --aab-mode=split."),
 ) -> None:
     """Run S0-S2, rewrite the manifest (S6), align/sign (S7), and gate (S8)."""
     if profile not in PROFILES:
@@ -158,6 +170,8 @@ def protect_apk(
             shell_version=shell_version,
             splits=split,
             bundletool=bundletool,
+            aab_mode=aab_mode,
+            device_spec=device_spec,
         ),
         tools,
     )
@@ -169,6 +183,7 @@ def protect_apk(
     container = work_dir / "container.fdx"
     key_file = work_dir / "keys" / "k_content.bin"
     effective_apk = Path(build_result.get("apk", apk))
+    effective_splits = [Path(item) for item in build_result.get("splits", [])]
     result = protect(
         ProtectOptions(
             apk=effective_apk,
@@ -190,7 +205,7 @@ def protect_apk(
             self_decrypt_text=self_decrypt_text,
             in_memory_libs=in_memory_libs,
             alg=alg,
-            splits=split,
+            splits=effective_splits,
         ),
         tools,
     )

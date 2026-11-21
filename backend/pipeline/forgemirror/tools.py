@@ -239,6 +239,40 @@ class AndroidTools:
                 out.write_bytes(archive.read("universal.apk"))
         return out
 
+    def aab_to_splits(self, aab: Path, out_dir: Path,
+                      bundletool: Path | None = None,
+                      device_spec: Path | None = None) -> list[Path]:
+        import tempfile
+        import zipfile
+
+        command = self._bundletool(bundletool)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="fm-bundletool-") as tmp:
+            apks = Path(tmp) / "bundle.apks"
+            arguments = [
+                *command,
+                "build-apks",
+                f"--bundle={aab}",
+                f"--output={apks}",
+                "--mode=default",
+                f"--aapt2={self.aapt2}",
+                "--overwrite",
+            ]
+            if device_spec is not None:
+                arguments.append(f"--device-spec={device_spec}")
+            self._run(arguments, timeout=600)
+            outputs: list[Path] = []
+            with zipfile.ZipFile(apks) as archive:
+                for name in sorted(archive.namelist()):
+                    if not name.startswith("splits/") or not name.endswith(".apk"):
+                        continue
+                    target = out_dir / Path(name).name
+                    target.write_bytes(archive.read(name))
+                    outputs.append(target)
+            if not outputs:
+                raise ToolError("bundletool produced no split APKs")
+            return outputs
+
     def _android_jar(self) -> Path:
         platforms = self.sdk_root / "platforms"
         if not platforms.is_dir():

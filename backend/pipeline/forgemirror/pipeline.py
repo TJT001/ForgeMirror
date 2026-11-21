@@ -8,6 +8,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from .apk import parse_badging
 from .dex_stage import run_dex_stage
 from .intake import run_intake
 from .inventory import run_inventory
@@ -27,6 +28,8 @@ class BuildOptions:
     key_file: Path | None = None
     splits: list[Path] | None = None
     bundletool: Path | None = None
+    aab_mode: str = "universal"
+    device_spec: Path | None = None
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -39,6 +42,7 @@ def run_build(options: BuildOptions, tools: AndroidTools) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     apk = Path(options.apk)
+    splits = [Path(item) for item in (options.splits or [])]
     bundled = apk.suffix.lower() == ".aab"
     if bundled:
         if options.splits:
@@ -50,10 +54,35 @@ def run_build(options: BuildOptions, tools: AndroidTools) -> dict:
                 "reason_codes": ["E_AAB_INVALID"],
                 "warnings": ["--split cannot be combined with .aab input"],
             }
+        if options.aab_mode not in ("universal", "split"):
+            return {
+                "ok": False,
+                "stage": "s0",
+                "build_id": build_id,
+                "out": str(out_dir),
+                "reason_codes": ["E_AAB_INVALID"],
+                "warnings": [f"unsupported AAB mode: {options.aab_mode}"],
+            }
         try:
-            apk = tools.aab_to_universal(
-                apk, out_dir / "universal.apk", options.bundletool
-            )
+            if options.aab_mode == "split":
+                candidates = tools.aab_to_splits(
+                    apk, out_dir / "bundle_splits",
+                    options.bundletool, options.device_spec,
+                )
+                bases = [
+                    path for path in candidates
+                    if not parse_badging(tools.badging(path)).split
+                ]
+                if len(bases) != 1:
+                    raise ToolError(
+                        f"expected one base APK, found {len(bases)}"
+                    )
+                apk = bases[0]
+                splits = [path for path in candidates if path != apk]
+            else:
+                apk = tools.aab_to_universal(
+                    apk, out_dir / "universal.apk", options.bundletool
+                )
         except ToolError as error:
             code = "E_BUNDLETOOL_MISSING" if "bundletool not found" in str(error) else "E_AAB_INVALID"
             return {
@@ -73,7 +102,7 @@ def run_build(options: BuildOptions, tools: AndroidTools) -> dict:
         tools=tools,
         cert_allowlist=options.cert_allowlist,
         allow_unsigned=options.allow_unsigned or bundled,
-        splits=options.splits,
+        splits=splits,
     )
     _write_json(out_dir / "intake.json", intake.model_dump(mode="json", by_alias=True))
     if not intake.ok:
@@ -88,13 +117,13 @@ def run_build(options: BuildOptions, tools: AndroidTools) -> dict:
 
     inventory = run_inventory(
         apk, tools=tools, shell_version=options.shell_version,
-        splits=options.splits,
+        splits=splits,
     )
     _write_json(out_dir / "inventory.json", inventory.model_dump(mode="json", by_alias=True))
 
     split_apks = {
         name: path
-        for name, path in zip(intake.split_names, options.splits or [])
+        for name, path in zip(intake.split_names, splits)
     }
     dex_result = run_dex_stage(
         apk,
@@ -126,7 +155,7 @@ def run_build(options: BuildOptions, tools: AndroidTools) -> dict:
             "splits": [
                 {"name": name,
                  "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
-                for name, path in zip(intake.split_names, options.splits or [])
+                for name, path in zip(intake.split_names, splits)
             ],
         },
         "shell": {"version": options.shell_version, "container": "FDX2"},
@@ -153,5 +182,6 @@ def run_build(options: BuildOptions, tools: AndroidTools) -> dict:
         "warnings": intake.warnings,
         "anomalies": [anomaly.model_dump() for anomaly in inventory.anomalies],
         "split_names": intake.split_names,
+        "splits": [str(path) for path in splits],
         "apk": str(apk),
     }
