@@ -22,6 +22,9 @@ public final class YidunSignaturesAssetTest {
                 "8ff576e1cc403f0d6173bee361dabc362be6319f4b71ceb375834600a50005ff"));
         assertTrue(json.contains("\"su_paths\""));
         assertTrue(json.contains("\"cloud_phone_prefixes\""));
+        assertTrue(json.contains("\"cloud_services\""));
+        assertTrue(json.contains("\"standard_magic\""));
+        assertTrue(json.contains("\"dex2oat_markers\""));
         assertFalse(json.contains("\"rom_context\""));
     }
 }

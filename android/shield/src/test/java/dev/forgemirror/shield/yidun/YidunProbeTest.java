@@ -7,6 +7,8 @@ import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
+import java.io.File;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -33,7 +35,10 @@ public final class YidunProbeTest {
                 list("/system/bin/nox-prop", "/system/bin/ldinit"),
                 list("vbox86p", "genymotion"),
                 list("init.svc.ldinit", "ro.genymotion.version"),
-                list("com.bluestacks.", "com.microvirt."));
+                list("com.bluestacks.", "com.microvirt."),
+                list("VMOS_MANAGER_SERVICE"),
+                list("dex\n035\0", "cdex001\0"),
+                list("dex2oat"));
     }
 
     @Test
@@ -71,6 +76,68 @@ public final class YidunProbeTest {
                 "com.bluestacks.home", signatures));
         assertFalse(YidunProbe.matchCloudPhonePackage(
                 "dev.forgemirror.demo", signatures));
+        assertTrue(YidunProbe.matchCloudService("VMOS_MANAGER_SERVICE", signatures));
+        assertFalse(YidunProbe.matchCloudService("user.xposed.system", signatures));
+    }
+
+    @Test
+    public void mapsAndElfClassification() throws Exception {
+        byte[] aarch64 = new byte[20];
+        aarch64[0] = 0x7f;
+        aarch64[1] = 'E';
+        aarch64[2] = 'L';
+        aarch64[3] = 'F';
+        aarch64[4] = 2;
+        aarch64[5] = 1;
+        aarch64[18] = (byte) 0xB7;
+        assertEquals(0xB7, YidunProbe.elfMachine(aarch64));
+        assertTrue(YidunProbe.isNativeElfMachine(0xB7));
+        assertTrue(YidunProbe.isNativeElfMachine(0x28));
+        assertTrue(YidunProbe.isNativeElfMachine(0x3E));
+        assertTrue(YidunProbe.isNativeElfMachine(0x03));
+        assertFalse(YidunProbe.isNativeElfMachine(0x14));
+        byte[] bigEndian = aarch64.clone();
+        bigEndian[5] = 2;
+        bigEndian[18] = 0;
+        bigEndian[19] = (byte) 0xB7;
+        assertEquals(0xB7, YidunProbe.elfMachine(bigEndian));
+        byte[] badMagic = aarch64.clone();
+        badMagic[0] = 0;
+        assertEquals(-1, YidunProbe.elfMachine(badMagic));
+        assertEquals(0xB7, YidunProbe.elfMachine(tempFile(aarch64)));
+
+        assertTrue(YidunProbe.isReadableMapLine(
+                "7f0000-7f1000 r-xp 00000000 fd:00 1 /data/app/libfoo.so"));
+        assertFalse(YidunProbe.isReadableMapLine(
+                "7f0000-7f1000 ---p 00000000 fd:00 1 /data/app/libfoo.so"));
+        assertFalse(YidunProbe.isReadableMapLine("7f0000-7f1000 r-xp 00000000"));
+        assertEquals("/data/app/libfoo.so",
+                YidunProbe.mapsPath("/data/app/libfoo.so (deleted)"));
+        assertNull(YidunProbe.mapsPath(
+                "/data/app/base.apk!lib/arm64-v8a/libfoo.so"));
+    }
+
+    @Test
+    public void dexMagicClassification() throws Exception {
+        YidunSignatures signatures = signatures();
+        assertTrue(YidunProbe.isStandardDexMagic("dex\n035\0", signatures));
+        assertTrue(YidunProbe.isStandardDexMagic("cdex001\0", signatures));
+        assertFalse(YidunProbe.isStandardDexMagic("dex\n099\0", signatures));
+        assertFalse(YidunProbe.isStandardDexMagic(null, signatures));
+
+        File dex = tempFile("dex\n035\0".getBytes(StandardCharsets.ISO_8859_1));
+        assertEquals("dex\n035\0", YidunProbe.dexMagic(dex));
+        assertEquals("dex\\n035\\0", YidunProbe.printable(YidunProbe.dexMagic(dex)));
+        assertEquals("unreadable", YidunProbe.printable(null));
+    }
+
+    private static File tempFile(byte[] data) throws Exception {
+        File file = File.createTempFile("forgemirror-yidun", ".bin");
+        file.deleteOnExit();
+        try (java.io.FileOutputStream output = new java.io.FileOutputStream(file)) {
+            output.write(data);
+        }
+        return file;
     }
 
     @Test
@@ -114,7 +181,7 @@ public final class YidunProbeTest {
         List<String> rules = list(YidunProbe.RULE_ROOT, YidunProbe.RULE_MOUNT,
                 YidunProbe.RULE_DEBUG, YidunProbe.RULE_HOOK, YidunProbe.RULE_XPOSED,
                 YidunProbe.RULE_INJECTION, YidunProbe.RULE_EMULATOR,
-                YidunProbe.RULE_LD_PRELOAD);
+                YidunProbe.RULE_LD_PRELOAD, YidunProbe.RULE_DEX);
         for (String rule : rules) {
             assertTrue(rule.startsWith("yidun_"));
         }

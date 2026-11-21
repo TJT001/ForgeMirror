@@ -195,6 +195,24 @@
       "com.netease.mumu.",
       "com.androVM.",
       "com.bignox."
+    ],
+    "cloud_services": [
+      "VMOS_MANAGER_SERVICE"
+    ]
+  },
+  "dex": {
+    "standard_magic": [
+      "dex\n035\u0000",
+      "dex\n036\u0000",
+      "dex\n037\u0000",
+      "dex\n038\u0000",
+      "dex\n039\u0000",
+      "dex\n040\u0000",
+      "dex\n041\u0000",
+      "cdex001\u0000"
+    ],
+    "dex2oat_markers": [
+      "dex2oat"
     ]
   }
 }

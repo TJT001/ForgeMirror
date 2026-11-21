@@ -14,9 +14,11 @@ import java.io.InputStream;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -38,12 +40,15 @@ public final class YidunProbe {
     public static final String RULE_INJECTION = "yidun_injection";
     public static final String RULE_EMULATOR = "yidun_emulator";
     public static final String RULE_LD_PRELOAD = "yidun_ld_preload";
+    public static final String RULE_DEX = "yidun_dex";
 
     private static final String TAG = "YidunProbe";
     private static final long MAX_PROC_BYTES = 8L << 20;
     private static final int MAX_FDS = 256;
     private static final int MAX_TASKS = 512;
     private static final int MAX_PACKAGES = 128;
+    private static final int MAX_MAPS_FILES = 64;
+    private static final int MAX_DEX_FILES = 64;
 
     public static final class Finding {
         public final String ruleId;
@@ -75,12 +80,17 @@ public final class YidunProbe {
         scanEmulatorPaths(findings, seen);
         scanEmulatorBuild(findings, seen);
         scanEmulatorProperties(findings, seen);
-        scanMaps(findings, seen);
+        String maps = readText("/proc/self/maps");
+        String[] mapsLines = maps.isEmpty() ? new String[0] : maps.split("\n");
+        scanMaps(mapsLines, findings, seen);
+        scanDex2oat(mapsLines, findings, seen);
         scanHookClasses(findings, seen);
         scanHookServices(findings, seen);
         scanFileDescriptors(findings, seen);
         scanLdPreload(findings, seen);
         scanCloudPhonePackages(context, findings, seen);
+        scanCloudServices(findings, seen);
+        scanDexFiles(context, findings, seen);
         return findings;
     }
 
@@ -186,6 +196,119 @@ public final class YidunProbe {
             }
         }
         return false;
+    }
+
+    static boolean matchCloudService(String name, YidunSignatures signatures) {
+        return name != null && signatures.cloudServices.contains(name);
+    }
+
+    static boolean isReadableMapLine(String line) {
+        String[] fields = mapFields(line);
+        if (fields == null || fields.length < 6
+                || fields[1].length() < 4 || fields[1].charAt(0) != 'r') {
+            return false;
+        }
+        String path = mapsPath(fields[5]);
+        return path != null && path.startsWith("/");
+    }
+
+    static String mapsPath(String path) {
+        if (path == null) {
+            return null;
+        }
+        String value = path.trim();
+        int deleted = value.indexOf(" (deleted)");
+        if (deleted >= 0) {
+            value = value.substring(0, deleted);
+        }
+        if (value.indexOf('!') >= 0) {
+            return null;
+        }
+        return value.isEmpty() ? null : value;
+    }
+
+    static int elfMachine(byte[] header) {
+        if (header == null || header.length < 20
+                || header[0] != 0x7f || header[1] != 'E'
+                || header[2] != 'L' || header[3] != 'F') {
+            return -1;
+        }
+        boolean bigEndian = (header[5] & 0xff) == 2;
+        int low = header[18] & 0xff;
+        int high = header[19] & 0xff;
+        return bigEndian ? (low << 8) | high : low | (high << 8);
+    }
+
+    static int elfMachine(File file) {
+        try (InputStream input = new FileInputStream(file)) {
+            byte[] header = new byte[20];
+            return readFully(input, header) == header.length
+                    ? elfMachine(header) : -1;
+        } catch (Throwable ignored) {
+            return -1;
+        }
+    }
+
+    static boolean isNativeElfMachine(int machine) {
+        return machine == 183      // AArch64
+                || machine == 40   // ARM
+                || machine == 62   // x86_64
+                || machine == 3;   // x86
+    }
+
+    static String dexMagic(File file) {
+        try (InputStream input = new FileInputStream(file)) {
+            byte[] header = new byte[8];
+            return readFully(input, header) == header.length
+                    ? new String(header, StandardCharsets.ISO_8859_1) : null;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    static boolean isStandardDexMagic(String magic, YidunSignatures signatures) {
+        return magic != null && signatures.dexStandardMagic.contains(magic);
+    }
+
+    static String printable(String value) {
+        if (value == null) {
+            return "unreadable";
+        }
+        StringBuilder builder = new StringBuilder(value.length());
+        for (int index = 0; index < value.length(); index++) {
+            char character = value.charAt(index);
+            if (character == '\n') {
+                builder.append("\\n");
+            } else if (character == 0) {
+                builder.append("\\0");
+            } else if (character < 0x20 || character > 0x7e) {
+                builder.append(String.format(Locale.US, "\\x%02x", (int) character));
+            } else {
+                builder.append(character);
+            }
+        }
+        return builder.toString();
+    }
+
+    private static String[] mapFields(String line) {
+        return line == null ? null : line.trim().split("\\s+", 6);
+    }
+
+    private static String mapField(String line) {
+        String[] fields = mapFields(line);
+        return fields != null && fields.length >= 6 ? fields[5] : null;
+    }
+
+    private static int readFully(InputStream input, byte[] buffer) throws Exception {
+        int read = 0;
+        while (read < buffer.length) {
+            int count = input.read(buffer, read, buffer.length - read);
+            if (count < 0) {
+                break;
+            }
+            read += count;
+        }
+        return read;
     }
 
     static int tracerPid(String line) {
@@ -330,19 +453,32 @@ public final class YidunProbe {
         }
     }
 
-    private void scanMaps(List<Finding> findings, Set<String> seen) {
-        String maps = readText("/proc/self/maps");
-        if (maps.isEmpty()) {
+    private void scanMaps(String[] lines, List<Finding> findings, Set<String> seen) {
+        if (lines.length == 0) {
             return;
         }
-        for (String line : maps.split("\n")) {
+        Map<String, Integer> machines = new HashMap<>();
+        for (String line : lines) {
             String ruleId = classifyMapsLine(line, signatures);
-            if (ruleId == null) {
+            if (ruleId == null || !isReadableMapLine(line)) {
                 continue;
             }
-            String path = pathOf(line);
-            add(findings, seen, ruleId, kindForHookRule(ruleId),
-                    path != null ? path : line.trim(), 0.8);
+            String path = mapsPath(mapField(line));
+            if (path == null) {
+                continue;
+            }
+            Integer machine = machines.get(path);
+            if (machine == null) {
+                if (machines.size() >= MAX_MAPS_FILES) {
+                    continue;
+                }
+                machine = elfMachine(new File(path));
+                machines.put(path, machine);
+            }
+            if (!isNativeElfMachine(machine)) {
+                continue;
+            }
+            add(findings, seen, ruleId, kindForHookRule(ruleId), path, 0.8);
         }
     }
 
@@ -444,6 +580,63 @@ public final class YidunProbe {
             }
         } catch (Throwable error) {
             Log.w(TAG, "package probe unavailable: " + error);
+        }
+    }
+
+    private void scanCloudServices(List<Finding> findings, Set<String> seen) {
+        for (String name : signatures.cloudServices) {
+            if (matchCloudService(name, signatures) && serviceExists(name)) {
+                add(findings, seen, RULE_EMULATOR, "emulator",
+                        "service:" + name, 0.7);
+            }
+        }
+    }
+
+    private void scanDex2oat(String[] lines, List<Finding> findings, Set<String> seen) {
+        if (lines.length == 0 || signatures.dex2oatMarkers.isEmpty()) {
+            return;
+        }
+        for (String line : lines) {
+            String lower = line.toLowerCase(Locale.US);
+            for (String marker : signatures.dex2oatMarkers) {
+                if (lower.contains(marker.toLowerCase(Locale.US))) {
+                    String path = mapsPath(mapField(line));
+                    add(findings, seen, RULE_DEX, "dex",
+                            "maps:" + marker + ":"
+                                    + (path != null ? path : line.trim()), 0.4);
+                    return;
+                }
+            }
+        }
+    }
+
+    private void scanDexFiles(Context context, List<Finding> findings, Set<String> seen) {
+        if (context == null) {
+            return;
+        }
+        File[] entries;
+        try {
+            entries = context.getCodeCacheDir().listFiles();
+        } catch (Throwable error) {
+            Log.w(TAG, "dex cache probe unavailable: " + error);
+            return;
+        }
+        if (entries == null) {
+            return;
+        }
+        int visited = 0;
+        for (File file : entries) {
+            if (visited++ > MAX_DEX_FILES) {
+                break;
+            }
+            if (!file.isFile() || !file.getName().endsWith(".dex")) {
+                continue;
+            }
+            String magic = dexMagic(file);
+            boolean standard = isStandardDexMagic(magic, signatures);
+            add(findings, seen, RULE_DEX, "dex",
+                    "dex:" + file.getAbsolutePath() + " magic=" + printable(magic),
+                    standard ? 0.5 : 0.7);
         }
     }
 

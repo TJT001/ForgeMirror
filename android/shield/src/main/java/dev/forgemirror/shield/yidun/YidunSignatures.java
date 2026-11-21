@@ -45,6 +45,9 @@ public final class YidunSignatures {
     public final List<String> emulatorBuildMarkers;
     public final List<String> emulatorProperties;
     public final List<String> cloudPhonePrefixes;
+    public final List<String> cloudServices;
+    public final List<String> dexStandardMagic;
+    public final List<String> dex2oatMarkers;
 
     YidunSignatures(String vendor, String library, String sampleSha256, String evidence,
                     List<String> suPaths, List<String> mountMarkers,
@@ -53,7 +56,9 @@ public final class YidunSignatures {
                     List<String> hookClasses, List<String> hookServices,
                     List<String> fdMarkers, List<String> ldPreloadMarkers,
                     List<String> emulatorPaths, List<String> emulatorBuildMarkers,
-                    List<String> emulatorProperties, List<String> cloudPhonePrefixes) {
+                    List<String> emulatorProperties, List<String> cloudPhonePrefixes,
+                    List<String> cloudServices, List<String> dexStandardMagic,
+                    List<String> dex2oatMarkers) {
         this.vendor = vendor;
         this.library = library;
         this.sampleSha256 = sampleSha256;
@@ -72,6 +77,9 @@ public final class YidunSignatures {
         this.emulatorBuildMarkers = immutable(emulatorBuildMarkers);
         this.emulatorProperties = immutable(emulatorProperties);
         this.cloudPhonePrefixes = immutable(cloudPhonePrefixes);
+        this.cloudServices = immutable(cloudServices);
+        this.dexStandardMagic = immutable(dexStandardMagic);
+        this.dex2oatMarkers = immutable(dex2oatMarkers);
     }
 
     public static YidunSignatures load(Context context) {
@@ -91,6 +99,7 @@ public final class YidunSignatures {
         JSONObject debug = root.optJSONObject("debug");
         JSONObject hook = root.optJSONObject("hook");
         JSONObject emulator = root.optJSONObject("emulator");
+        JSONObject dex = root.optJSONObject("dex");
         return new YidunSignatures(
                 optString(source, "vendor"),
                 optString(source, "library"),
@@ -109,18 +118,24 @@ public final class YidunSignatures {
                 strings(emulator, "paths"),
                 strings(emulator, "build_markers"),
                 strings(emulator, "properties"),
-                strings(emulator, "cloud_phone_prefixes"));
+                strings(emulator, "cloud_phone_prefixes"),
+                strings(emulator, "cloud_services"),
+                strings(dex, "standard_magic"),
+                strings(dex, "dex2oat_markers"));
     }
 
     public static YidunSignatures empty() {
         return new YidunSignatures("", "", "", "",
                 Collections.emptyList(), Collections.emptyList(),
-                Collections.emptyList(), "", Collections.emptyList(),
+                Collections.emptyList(), "",
+                Collections.emptyList(),
+                Collections.emptyList(), Collections.emptyList(),
+                Collections.emptyList(),
                 Collections.emptyList(), Collections.emptyList(),
                 Collections.emptyList(), Collections.emptyList(),
                 Collections.emptyList(), Collections.emptyList(),
-                Collections.emptyList(), Collections.emptyList(),
-                Collections.emptyList());
+                Collections.emptyList(),
+                Collections.emptyList(), Collections.emptyList());
     }
 
     public boolean isEmpty() {
@@ -130,7 +145,8 @@ public final class YidunSignatures {
                 && hookServices.isEmpty() && fdMarkers.isEmpty()
                 && ldPreloadMarkers.isEmpty() && emulatorPaths.isEmpty()
                 && emulatorBuildMarkers.isEmpty() && emulatorProperties.isEmpty()
-                && cloudPhonePrefixes.isEmpty();
+                && cloudPhonePrefixes.isEmpty() && cloudServices.isEmpty()
+                && dexStandardMagic.isEmpty() && dex2oatMarkers.isEmpty();
     }
 
     private static List<String> strings(JSONObject object, String key) {

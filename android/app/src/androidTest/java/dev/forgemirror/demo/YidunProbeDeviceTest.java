@@ -47,6 +47,7 @@ public class YidunProbeDeviceTest {
         Log.i(TAG, "probe findings=" + findings.size()
                 + " elapsedMs=" + (android.os.SystemClock.elapsedRealtime() - started));
         List<String> emulatorFindings = new ArrayList<>();
+        List<String> dexFindings = new ArrayList<>();
         List<String> unexpected = new ArrayList<>();
         for (YidunProbe.Finding finding : findings) {
             Log.i(TAG, finding.ruleId + " kind=" + finding.kind
@@ -54,12 +55,21 @@ public class YidunProbeDeviceTest {
                     + " evidence=" + finding.evidence);
             if ("emulator".equals(finding.kind)) {
                 emulatorFindings.add(finding.ruleId + ":" + finding.evidence);
+            } else if ("dex".equals(finding.kind)) {
+                dexFindings.add(finding.ruleId + ":" + finding.evidence);
             } else if ("hook".equals(finding.kind) || "xposed".equals(finding.kind)
                     || "injection".equals(finding.kind)) {
                 unexpected.add(finding.ruleId + ":" + finding.evidence);
             }
         }
-        assertTrue("unexpected hook/xposed/injection findings: " + unexpected,
+        for (String dex : dexFindings) {
+            // Standard DEX in code_cache is reported but tolerated; unknown magic
+            // or a dex2oat mapping is treated as a false positive here.
+            if (!dex.contains("magic=dex\\n") && !dex.contains("magic=cdex")) {
+                unexpected.add(dex);
+            }
+        }
+        assertTrue("unexpected hook/xposed/injection/dex findings: " + unexpected,
                 unexpected.isEmpty());
         if (emulator) {
             assertFalse("emulator not detected: " + findings, emulatorFindings.isEmpty());
