@@ -120,6 +120,16 @@
       "license": "MIT",
       "pinned": false,
       "notes": "Frontend build tool; dev/build only"
+    },
+    {
+      "id": "ANDROID-DOBBY",
+      "name": "Dobby",
+      "version": "c1da0315d7a2069bde2ab432e45d4ab6df91237a",
+      "scope": "client",
+      "status": "candidate",
+      "license": "Apache-2.0",
+      "pinned": true,
+      "notes": "x86_64 inline-hook backend (LSPosed fork with complete arch sources); vendor LICENSE kept; static-linked into libshield_hook; review bundled TINYSTL/logging notices before release"
     }
   ]
 }

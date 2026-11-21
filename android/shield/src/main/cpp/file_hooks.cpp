@@ -11,7 +11,11 @@
 
 #include <linux/openat2.h>
 
+#if defined(FM_HOOK_DOBBY)
+#include <dobby.h>
+#else
 #include <shadowhook.h>
+#endif
 
 #include <atomic>
 #include <cerrno>
@@ -27,6 +31,44 @@
 #include <vector>
 
 namespace {
+
+#if defined(FM_HOOK_DOBBY)
+thread_local void *gHookCaller = nullptr;
+std::mutex gOriginLock;
+std::unordered_map<void *, void *> gOrigins;
+std::unordered_set<void *> gHookedAddresses;
+
+struct HookCallerScope {
+    void *previous;
+    explicit HookCallerScope(void *caller) : previous(gHookCaller) {
+        gHookCaller = caller;
+    }
+    ~HookCallerScope() { gHookCaller = previous; }
+};
+
+void *fm_prev(void *proxy) {
+    std::lock_guard<std::mutex> guard(gOriginLock);
+    auto found = gOrigins.find(proxy);
+    return found == gOrigins.end() ? nullptr : found->second;
+}
+
+void *hook_caller_address() {
+    return gHookCaller;
+}
+
+#define FM_HOOK_SCOPE() HookCallerScope fm_hook_caller_scope( \
+        __builtin_return_address(0))
+#else
+void *fm_prev(void *proxy) {
+    return shadowhook_get_prev_func(proxy);
+}
+
+void *hook_caller_address() {
+    return shadowhook_get_return_address();
+}
+
+#define FM_HOOK_SCOPE() SHADOWHOOK_STACK_SCOPE()
+#endif
 
 constexpr const char *kTag = "ShieldHook";
 constexpr int kMaxFds = 1024;
@@ -456,7 +498,7 @@ bool is_covered(const char *path) {
 
 bool app_native_caller() {
     Dl_info info{};
-    void *address = shadowhook_get_return_address();
+    void *address = hook_caller_address();
     using contains_t = bool (*)(const void *);
     static contains_t custom_contains = [] {
         void *handle = dlopen("libshield_boot.so", RTLD_NOW | RTLD_NOLOAD);
@@ -478,7 +520,8 @@ bool app_native_caller() {
     }
     const char *name = info.dli_fname;
     if (strstr(name, "libshield") != nullptr ||
-        strstr(name, "libshadowhook") != nullptr) {
+        strstr(name, "libshadowhook") != nullptr ||
+        strstr(name, "libdobby") != nullptr) {
         return false;
     }
     if (strncmp(name, "/data/app/", 10) == 0 ||
@@ -697,7 +740,7 @@ mode_t mode_from_args(int flags, va_list args) {
 }
 
 int proxy_open(const char *path, int flags, ...) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     va_list args;
     va_start(args, flags);
     mode_t mode = mode_from_args(flags, args);
@@ -722,7 +765,7 @@ int proxy_open(const char *path, int flags, ...) {
             return -1;
         }
     }
-    auto prev = (open_t) shadowhook_get_prev_func((void *) &proxy_open);
+    auto prev = (open_t) fm_prev((void *) &proxy_open);
     int fd = prev != nullptr ? prev(path, flags, mode) : -1;
     if (fd >= 0 && !gInternal && !resolved.empty()) {
         remember_fd(fd, resolved.c_str());
@@ -731,7 +774,7 @@ int proxy_open(const char *path, int flags, ...) {
 }
 
 int proxy_openat(int dirfd, const char *path, int flags, ...) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     va_list args;
     va_start(args, flags);
     mode_t mode = mode_from_args(flags, args);
@@ -757,7 +800,7 @@ int proxy_openat(int dirfd, const char *path, int flags, ...) {
             return -1;
         }
     }
-    auto prev = (openat_t) shadowhook_get_prev_func((void *) &proxy_openat);
+    auto prev = (openat_t) fm_prev((void *) &proxy_openat);
     int fd = prev != nullptr ? prev(dirfd, path, flags, mode) : -1;
     if (fd >= 0 && !gInternal && !resolved.empty()) {
         remember_fd(fd, resolved.c_str());
@@ -766,7 +809,7 @@ int proxy_openat(int dirfd, const char *path, int flags, ...) {
 }
 
 int proxy_open64(const char *path, int flags, ...) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     va_list args;
     va_start(args, flags);
     mode_t mode = mode_from_args(flags, args);
@@ -791,7 +834,7 @@ int proxy_open64(const char *path, int flags, ...) {
             return -1;
         }
     }
-    auto prev = (open_t) shadowhook_get_prev_func((void *) &proxy_open64);
+    auto prev = (open_t) fm_prev((void *) &proxy_open64);
     int fd = prev != nullptr ? prev(path, flags, mode) : -1;
     if (fd >= 0 && !gInternal && !resolved.empty()) {
         remember_fd(fd, resolved.c_str());
@@ -800,7 +843,7 @@ int proxy_open64(const char *path, int flags, ...) {
 }
 
 int proxy_openat64(int dirfd, const char *path, int flags, ...) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     va_list args;
     va_start(args, flags);
     mode_t mode = mode_from_args(flags, args);
@@ -826,7 +869,7 @@ int proxy_openat64(int dirfd, const char *path, int flags, ...) {
             return -1;
         }
     }
-    auto prev = (openat_t) shadowhook_get_prev_func((void *) &proxy_openat64);
+    auto prev = (openat_t) fm_prev((void *) &proxy_openat64);
     int fd = prev != nullptr ? prev(dirfd, path, flags, mode) : -1;
     if (fd >= 0 && !gInternal && !resolved.empty()) {
         remember_fd(fd, resolved.c_str());
@@ -835,7 +878,7 @@ int proxy_openat64(int dirfd, const char *path, int flags, ...) {
 }
 
 int proxy_open2(const char *path, int flags) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     std::string resolved = resolve_at(AT_FDCWD, path);
     if (blocked_now(resolved, flags)) {
         log_deny("blocked", resolved.c_str());
@@ -856,7 +899,7 @@ int proxy_open2(const char *path, int flags) {
             return -1;
         }
     }
-    auto prev = (open2_t) shadowhook_get_prev_func((void *) &proxy_open2);
+    auto prev = (open2_t) fm_prev((void *) &proxy_open2);
     int fd = prev != nullptr ? prev(path, flags) : -1;
     if (fd >= 0 && !gInternal && !resolved.empty()) {
         remember_fd(fd, resolved.c_str());
@@ -865,7 +908,7 @@ int proxy_open2(const char *path, int flags) {
 }
 
 int proxy_openat2(int dirfd, const char *path, int flags) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     std::string resolved = (path != nullptr && path[0] == '/')
             ? std::string(path) : resolve_at(dirfd, path);
     if (blocked_now(resolved, flags)) {
@@ -887,7 +930,7 @@ int proxy_openat2(int dirfd, const char *path, int flags) {
             return -1;
         }
     }
-    auto prev = (openat2_t) shadowhook_get_prev_func((void *) &proxy_openat2);
+    auto prev = (openat2_t) fm_prev((void *) &proxy_openat2);
     int fd = prev != nullptr ? prev(dirfd, path, flags) : -1;
     if (fd >= 0 && !gInternal && !resolved.empty()) {
         remember_fd(fd, resolved.c_str());
@@ -898,7 +941,7 @@ int proxy_openat2(int dirfd, const char *path, int flags) {
 
 #if defined(__aarch64__)
 long proxy_syscall(long number, ...) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     va_list args;
     va_start(args, number);
     long a1 = va_arg(args, long);
@@ -989,48 +1032,48 @@ long proxy_syscall(long number, ...) {
         errno = EACCES;
         return -1;
     }
-    auto prev = (syscall_t) shadowhook_get_prev_func((void *) &proxy_syscall);
+    auto prev = (syscall_t) fm_prev((void *) &proxy_syscall);
     return prev != nullptr ? prev(number, a1, a2, a3, a4, a5, a6) : -1;
 }
 
 #endif
 int proxy_fsync(int fd) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     if (!gInternal && is_shadow(fd)) {
         java_sync_shadow(fd, false);
     }
-    auto prev = (fsync_t) shadowhook_get_prev_func((void *) &proxy_fsync);
+    auto prev = (fsync_t) fm_prev((void *) &proxy_fsync);
     return prev != nullptr ? prev(fd) : -1;
 }
 
 int proxy_munmap(void *addr, size_t length) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     if (!gInternal) {
         std::vector<int> fds = take_maps(addr, length, true);
         for (int fd : fds) {
             java_sync_shadow(fd, false);
         }
     }
-    auto prev = (munmap_t) shadowhook_get_prev_func((void *) &proxy_munmap);
+    auto prev = (munmap_t) fm_prev((void *) &proxy_munmap);
     return prev != nullptr ? prev(addr, length) : -1;
 }
 
 int proxy_msync(void *addr, size_t length, int flags) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     if (!gInternal) {
         std::vector<int> fds = take_maps(addr, length, false);
         for (int fd : fds) {
             java_sync_shadow(fd, false);
         }
     }
-    auto prev = (msync_t) shadowhook_get_prev_func((void *) &proxy_msync);
+    auto prev = (msync_t) fm_prev((void *) &proxy_msync);
     return prev != nullptr ? prev(addr, length, flags) : -1;
 }
 
 int proxy_openat2_how(int dirfd, const char *path, struct open_how *how, size_t size) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     if (how == nullptr || size < sizeof(struct open_how)) {
-        auto prev = (openat2_how_t) shadowhook_get_prev_func((void *) &proxy_openat2_how);
+        auto prev = (openat2_how_t) fm_prev((void *) &proxy_openat2_how);
         return prev != nullptr ? prev(dirfd, path, how, size) : -1;
     }
     int flags = static_cast<int>(how->flags);
@@ -1065,13 +1108,13 @@ int proxy_openat2_how(int dirfd, const char *path, struct open_how *how, size_t 
             return -1;
         }
     }
-    auto prev = (openat2_how_t) shadowhook_get_prev_func((void *) &proxy_openat2_how);
+    auto prev = (openat2_how_t) fm_prev((void *) &proxy_openat2_how);
     return prev != nullptr ? prev(dirfd, path, how, size) : -1;
 }
 
 ssize_t proxy_write(int fd, const void *buffer, size_t count) {
-    SHADOWHOOK_STACK_SCOPE();
-    auto prev = (write_t) shadowhook_get_prev_func((void *) &proxy_write);
+    FM_HOOK_SCOPE();
+    auto prev = (write_t) fm_prev((void *) &proxy_write);
     ssize_t result = prev != nullptr ? prev(fd, buffer, count) : -1;
     if (result > 0) {
         mark_dirty(fd);
@@ -1080,8 +1123,8 @@ ssize_t proxy_write(int fd, const void *buffer, size_t count) {
 }
 
 ssize_t proxy_pwrite64(int fd, const void *buffer, size_t count, off64_t offset) {
-    SHADOWHOOK_STACK_SCOPE();
-    auto prev = (pwrite64_t) shadowhook_get_prev_func((void *) &proxy_pwrite64);
+    FM_HOOK_SCOPE();
+    auto prev = (pwrite64_t) fm_prev((void *) &proxy_pwrite64);
     ssize_t result = prev != nullptr ? prev(fd, buffer, count, offset) : -1;
     if (result > 0) {
         mark_dirty(fd);
@@ -1090,8 +1133,8 @@ ssize_t proxy_pwrite64(int fd, const void *buffer, size_t count, off64_t offset)
 }
 
 ssize_t proxy_writev(int fd, const struct iovec *iov, int count) {
-    SHADOWHOOK_STACK_SCOPE();
-    auto prev = (writev_t) shadowhook_get_prev_func((void *) &proxy_writev);
+    FM_HOOK_SCOPE();
+    auto prev = (writev_t) fm_prev((void *) &proxy_writev);
     ssize_t result = prev != nullptr ? prev(fd, iov, count) : -1;
     if (result > 0) {
         mark_dirty(fd);
@@ -1126,8 +1169,8 @@ bool encrypted_dlopen(const char *filename, std::string *path) {
 }
 
 void *proxy_dlopen(const char *filename, int flags) {
-    SHADOWHOOK_STACK_SCOPE();
-    auto prev = (dlopen_t) shadowhook_get_prev_func((void *) &proxy_dlopen);
+    FM_HOOK_SCOPE();
+    auto prev = (dlopen_t) fm_prev((void *) &proxy_dlopen);
     if (prev == nullptr) {
         return nullptr;
     }
@@ -1139,8 +1182,8 @@ void *proxy_dlopen(const char *filename, int flags) {
 }
 
 void *proxy_loader_dlopen(const char *filename, int flags, const void *caller) {
-    SHADOWHOOK_STACK_SCOPE();
-    auto prev = (loader_dlopen_t) shadowhook_get_prev_func(
+    FM_HOOK_SCOPE();
+    auto prev = (loader_dlopen_t) fm_prev(
             (void *) &proxy_loader_dlopen);
     if (prev == nullptr) {
         return nullptr;
@@ -1153,8 +1196,8 @@ void *proxy_loader_dlopen(const char *filename, int flags, const void *caller) {
 }
 
 int proxy_dup(int oldfd) {
-    SHADOWHOOK_STACK_SCOPE();
-    auto prev = (dup_t) shadowhook_get_prev_func((void *) &proxy_dup);
+    FM_HOOK_SCOPE();
+    auto prev = (dup_t) fm_prev((void *) &proxy_dup);
     int result = prev != nullptr ? prev(oldfd) : -1;
     if (result >= 0 && is_shadow(oldfd)) {
         remember_shadow(result);
@@ -1165,10 +1208,10 @@ int proxy_dup(int oldfd) {
 }
 
 int proxy_dup2(int oldfd, int newfd) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     bool oldShadow = is_shadow(oldfd);
     bool newShadow = is_shadow(newfd);
-    auto prev = (dup2_t) shadowhook_get_prev_func((void *) &proxy_dup2);
+    auto prev = (dup2_t) fm_prev((void *) &proxy_dup2);
     int result = prev != nullptr ? prev(oldfd, newfd) : -1;
     if (result >= 0) {
         if (newShadow && !(oldShadow && oldfd == newfd)) {
@@ -1186,10 +1229,10 @@ int proxy_dup2(int oldfd, int newfd) {
 }
 
 int proxy_dup3(int oldfd, int newfd, int flags) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     bool oldShadow = is_shadow(oldfd);
     bool newShadow = is_shadow(newfd);
-    auto prev = (dup3_t) shadowhook_get_prev_func((void *) &proxy_dup3);
+    auto prev = (dup3_t) fm_prev((void *) &proxy_dup3);
     int result = prev != nullptr ? prev(oldfd, newfd, flags) : -1;
     if (result >= 0) {
         if (newShadow) {
@@ -1269,8 +1312,8 @@ bool fcntl_lock_command(int command) {
 }
 
 int proxy_flock(int fd, int operation) {
-    SHADOWHOOK_STACK_SCOPE();
-    auto prev = (flock_t) shadowhook_get_prev_func((void *) &proxy_flock);
+    FM_HOOK_SCOPE();
+    auto prev = (flock_t) fm_prev((void *) &proxy_flock);
     if (prev == nullptr) {
         return -1;
     }
@@ -1284,8 +1327,8 @@ int proxy_flock(int fd, int operation) {
 }
 
 __attribute__((unused)) int proxy_fcntl(int fd, int command, ...) {
-    SHADOWHOOK_STACK_SCOPE();
-    auto prev = (fcntl_t) shadowhook_get_prev_func((void *) &proxy_fcntl);
+    FM_HOOK_SCOPE();
+    auto prev = (fcntl_t) fm_prev((void *) &proxy_fcntl);
     if (prev == nullptr) {
         return -1;
     }
@@ -1323,30 +1366,30 @@ __attribute__((unused)) int proxy_fcntl(int fd, int command, ...) {
 }
 
 int proxy_close(int fd) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     release_lock_fd(fd);
     if (!gInternal && is_shadow(fd)) {
         java_sync_shadow(fd, true);
         forget_shadow(fd);
     }
     forget_fd(fd);
-    auto prev = (close_t) shadowhook_get_prev_func((void *) &proxy_close);
+    auto prev = (close_t) fm_prev((void *) &proxy_close);
     return prev != nullptr ? prev(fd) : -1;
 }
 
 int proxy_rename(const char *from, const char *to) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     if ((java_is_protected(from) || java_is_protected(to)) && deny_now()) {
         log_deny("rename", from);
         errno = EACCES;
         return -1;
     }
-    auto prev = (rename_t) shadowhook_get_prev_func((void *) &proxy_rename);
+    auto prev = (rename_t) fm_prev((void *) &proxy_rename);
     return prev != nullptr ? prev(from, to) : -1;
 }
 
 int proxy_renameat(int fromfd, const char *from, int tofd, const char *to) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     std::string source = (from != nullptr && from[0] == '/')
             ? std::string(from) : resolve_at(fromfd, from);
     std::string target = (to != nullptr && to[0] == '/')
@@ -1357,23 +1400,23 @@ int proxy_renameat(int fromfd, const char *from, int tofd, const char *to) {
         errno = EACCES;
         return -1;
     }
-    auto prev = (renameat_t) shadowhook_get_prev_func((void *) &proxy_renameat);
+    auto prev = (renameat_t) fm_prev((void *) &proxy_renameat);
     return prev != nullptr ? prev(fromfd, from, tofd, to) : -1;
 }
 
 int proxy_unlink(const char *path) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     if (java_is_protected(path) && deny_now()) {
         log_deny("unlink", path);
         errno = EACCES;
         return -1;
     }
-    auto prev = (unlink_t) shadowhook_get_prev_func((void *) &proxy_unlink);
+    auto prev = (unlink_t) fm_prev((void *) &proxy_unlink);
     return prev != nullptr ? prev(path) : -1;
 }
 
 int proxy_unlinkat(int dirfd, const char *path, int flags) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     std::string resolved = (path != nullptr && path[0] == '/')
             ? std::string(path) : resolve_at(dirfd, path);
     if (!resolved.empty() && java_is_protected(resolved.c_str()) && deny_now()) {
@@ -1381,30 +1424,30 @@ int proxy_unlinkat(int dirfd, const char *path, int flags) {
         errno = EACCES;
         return -1;
     }
-    auto prev = (unlinkat_t) shadowhook_get_prev_func((void *) &proxy_unlinkat);
+    auto prev = (unlinkat_t) fm_prev((void *) &proxy_unlinkat);
     return prev != nullptr ? prev(dirfd, path, flags) : -1;
 }
 
 int proxy_truncate(const char *path, off_t length) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     if (java_is_protected(path) && deny_now()) {
         log_deny("truncate", path);
         errno = EACCES;
         return -1;
     }
-    auto prev = (truncate_t) shadowhook_get_prev_func((void *) &proxy_truncate);
+    auto prev = (truncate_t) fm_prev((void *) &proxy_truncate);
     return prev != nullptr ? prev(path, length) : -1;
 }
 
 int proxy_ftruncate(int fd, off_t length) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     std::string path;
     if (!is_shadow(fd) && fd_covered(fd, &path) && deny_now()) {
         log_deny("ftruncate", path.c_str());
         errno = EACCES;
         return -1;
     }
-    auto prev = (ftruncate_t) shadowhook_get_prev_func((void *) &proxy_ftruncate);
+    auto prev = (ftruncate_t) fm_prev((void *) &proxy_ftruncate);
     int result = prev != nullptr ? prev(fd, length) : -1;
     if (result == 0) {
         mark_dirty(fd);
@@ -1413,14 +1456,14 @@ int proxy_ftruncate(int fd, off_t length) {
 }
 
 void *proxy_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     std::string path;
     if ((prot & PROT_WRITE) != 0 && !is_shadow(fd) && fd_covered(fd, &path) && deny_now()) {
         log_deny("mmap", path.c_str());
         errno = EACCES;
         return MAP_FAILED;
     }
-    auto prev = (mmap_t) shadowhook_get_prev_func((void *) &proxy_mmap);
+    auto prev = (mmap_t) fm_prev((void *) &proxy_mmap);
     void *result = prev != nullptr ? prev(addr, length, prot, flags, fd, offset) : MAP_FAILED;
     if (result != MAP_FAILED && (prot & PROT_WRITE) != 0 && is_shadow(fd)) {
         remember_map(result, length, fd);
@@ -1430,14 +1473,14 @@ void *proxy_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t o
 }
 
 void *proxy_mmap64(void *addr, size_t length, int prot, int flags, int fd, off64_t offset) {
-    SHADOWHOOK_STACK_SCOPE();
+    FM_HOOK_SCOPE();
     std::string path;
     if ((prot & PROT_WRITE) != 0 && !is_shadow(fd) && fd_covered(fd, &path) && deny_now()) {
         log_deny("mmap64", path.c_str());
         errno = EACCES;
         return MAP_FAILED;
     }
-    auto prev = (mmap64_t) shadowhook_get_prev_func((void *) &proxy_mmap64);
+    auto prev = (mmap64_t) fm_prev((void *) &proxy_mmap64);
     void *result = prev != nullptr ? prev(addr, length, prot, flags, fd, offset) : MAP_FAILED;
     if (result != MAP_FAILED && (prot & PROT_WRITE) != 0 && is_shadow(fd)) {
         remember_map(result, length, fd);
@@ -1449,6 +1492,34 @@ void *proxy_mmap64(void *addr, size_t length, int prot, int flags, int fd, off64
 template <typename T>
 int hook(const char *symbol, void *replacement, T *original) {
     (void) original;
+#if defined(FM_HOOK_DOBBY)
+    void *address = dlsym(RTLD_DEFAULT, symbol);
+    if (address == nullptr) {
+        __android_log_print(ANDROID_LOG_WARN, kTag, "hook %s failed", symbol);
+        return 0;
+    }
+    {
+        std::lock_guard<std::mutex> guard(gOriginLock);
+        if (gHookedAddresses.find(address) != gHookedAddresses.end()) {
+            return 1;
+        }
+    }
+    dobby_dummy_func_t origin = nullptr;
+    if (DobbyHook(address, reinterpret_cast<dobby_dummy_func_t>(replacement),
+                  &origin) != 0 || origin == nullptr) {
+        __android_log_print(ANDROID_LOG_WARN, kTag,
+                            "dobby hook %s failed at %p", symbol, address);
+        return 0;
+    }
+    {
+        std::lock_guard<std::mutex> guard(gOriginLock);
+        gOrigins[replacement] = reinterpret_cast<void *>(origin);
+        gHookedAddresses.insert(address);
+    }
+    __android_log_print(ANDROID_LOG_INFO, kTag,
+                        "hook %s at %p ok (dobby)", symbol, address);
+    return 1;
+#else
     void *addresses[16];
     int count = 0;
     auto add = [&addresses, &count](void *address) {
@@ -1498,9 +1569,11 @@ int hook(const char *symbol, void *replacement, T *original) {
         __android_log_print(ANDROID_LOG_WARN, kTag, "hook %s failed", symbol);
     }
     return installed;
+#endif
 }
 
 void install() {
+#if !defined(FM_HOOK_DOBBY)
     int status = shadowhook_init(SHADOWHOOK_MODE_SHARED, false);
     if (status != 0) {
         __android_log_print(ANDROID_LOG_WARN, kTag,
@@ -1508,6 +1581,7 @@ void install() {
                             shadowhook_to_errmsg(shadowhook_get_init_errno()));
         return;
     }
+#endif
     hook("open", reinterpret_cast<void *>(&proxy_open), &g_open);
     hook("openat", reinterpret_cast<void *>(&proxy_openat), &g_openat);
     hook("__open_2", reinterpret_cast<void *>(&proxy_open2), &g_open2);
