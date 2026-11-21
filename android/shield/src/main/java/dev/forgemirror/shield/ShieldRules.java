@@ -32,8 +32,6 @@ final class ShieldRules {
     private static final int HEADER_SIZE = 26;
     private static final int TAG_SIZE = 16;
     private static final int SIGNATURE_SIZE = 64;
-    private static final byte[] LABEL =
-            "FM/rules/v1".getBytes(StandardCharsets.US_ASCII);
     private static final long MAX_SCAN_BYTES = 64L << 20;
     private static final String TAG = "ShieldRules";
 
@@ -54,7 +52,7 @@ final class ShieldRules {
         return yidun;
     }
 
-    static ShieldRules load(Context context, ShieldConfig config, byte[] kContent) {
+    static ShieldRules load(Context context, ShieldConfig config, byte[] rulesKey) {
         if (config.rules == null || config.rules.isEmpty()) {
             return null;
         }
@@ -62,7 +60,7 @@ final class ShieldRules {
         if (remote.isFile()) {
             try {
                 byte[] pkg = readFile(remote);
-                ShieldRules loaded = parsePackage(context, config, kContent, pkg);
+                ShieldRules loaded = parsePackage(context, config, rulesKey, pkg);
                 Log.i(TAG, "loaded remote rules version=" + loaded.version);
                 return loaded;
             } catch (Exception error) {
@@ -71,7 +69,7 @@ final class ShieldRules {
         }
         try {
             byte[] pkg = ShieldAssets.read(context, config.rules);
-            return parsePackage(context, config, kContent, pkg);
+            return parsePackage(context, config, rulesKey, pkg);
         } catch (Exception error) {
             Log.w(TAG, "rules unavailable: " + error);
             return null;
@@ -79,7 +77,7 @@ final class ShieldRules {
     }
 
     static ShieldRules parsePackage(Context context, ShieldConfig config,
-                                    byte[] kContent, byte[] pkg) throws Exception {
+                                    byte[] rulesKey, byte[] pkg) throws Exception {
         {
             if (pkg == null) {
                 throw new SecurityException("empty rule package");
@@ -107,11 +105,9 @@ final class ShieldRules {
             byte[] body = Arrays.copyOfRange(pkg, 0, pkg.length - SIGNATURE_SIZE);
             ShieldSignature.verify(context, config, sigAlg, signature, body);
 
-            byte[] key = ShieldCrypto.hkdf(kContent,
-                    ShieldPolicy.uuidBytes(config.buildId), LABEL);
             byte[] ciphertext = Arrays.copyOfRange(
                     pkg, HEADER_SIZE, pkg.length - SIGNATURE_SIZE);
-            byte[] plaintext = ShieldCrypto.gcmDecrypt(key, nonce, ciphertext,
+            byte[] plaintext = ShieldCrypto.gcmDecrypt(rulesKey, nonce, ciphertext,
                     Arrays.copyOfRange(pkg, 0, HEADER_SIZE));
             JSONObject json = new JSONObject(
                     new String(plaintext, StandardCharsets.UTF_8));

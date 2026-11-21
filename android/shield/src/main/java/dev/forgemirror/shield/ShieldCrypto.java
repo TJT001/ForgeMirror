@@ -5,7 +5,6 @@ import java.nio.ByteOrder;
 import java.security.SecureRandom;
 
 import javax.crypto.Cipher;
-import javax.crypto.Mac;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
@@ -17,16 +16,6 @@ final class ShieldCrypto {
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private ShieldCrypto() {
-    }
-
-    static byte[] hkdf(byte[] ikm, byte[] salt, byte[] info) throws Exception {
-        Mac mac = Mac.getInstance("HmacSHA256");
-        mac.init(new SecretKeySpec(salt, "HmacSHA256"));
-        byte[] prk = mac.doFinal(ikm);
-        mac.init(new SecretKeySpec(prk, "HmacSHA256"));
-        mac.update(info);
-        mac.update((byte) 0x01);
-        return mac.doFinal();
     }
 
     static byte[] gcmEncrypt(byte[] key, byte[] nonce, byte[] plaintext, byte[] aad)

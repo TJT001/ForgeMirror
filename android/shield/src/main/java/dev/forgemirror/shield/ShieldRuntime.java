@@ -78,34 +78,48 @@ public final class ShieldRuntime {
 
             // P1-B uses a local developer key path; key service is P2.
             state = STATE_KEY_READY;
-            byte[] contentKey = null;
+            byte[] buildId = ShieldPolicy.uuidBytes(config.buildId);
+            byte[] coreKey = null;
 
             if ((config.key != null && !config.key.isEmpty())
                     || (config.authUrl != null && !config.authUrl.isEmpty())) {
                 long started = SystemClock.elapsedRealtimeNanos();
-                byte[] key;
                 if (config.key != null && !config.key.isEmpty()) {
-                    key = ShieldAssets.read(context, config.key);
-                    if (ShieldWhitebox.isWrapped(key)) {
-                        key = ShieldWhitebox.unwrap(context, key);
-                        Log.i(TAG, "content key unwrapped from white-box vault");
+                    byte[] blob = ShieldAssets.read(context, config.key);
+                    if (ShieldKeyVault.isWrapped(blob)) {
+                        long vaultStarted = SystemClock.elapsedRealtimeNanos();
+                        byte[] table = ShieldAssets.read(
+                                context, ShieldKeyVault.TABLE_ASSET);
+                        ShieldKeyVault.installWrapped(blob, table);
+                        Log.i(TAG, "content key unwrapped in native white-box vault ms="
+                                + (SystemClock.elapsedRealtimeNanos() - vaultStarted) / 1_000_000L);
+                    } else {
+                        ShieldKeyVault.installRaw(blob);
                     }
                 } else {
-                    key = ShieldAuthClient.fetchContentKey(context, config);
+                    byte[] key = ShieldAuthClient.fetchContentKey(context, config);
+                    try {
+                        ShieldKeyVault.installRaw(key);
+                    } finally {
+                        java.util.Arrays.fill(key, (byte) 0);
+                    }
                     Log.i(TAG, "content key obtained from dev authorization");
                 }
-                contentKey = key;
+                byte[] policyKey = ShieldKeyVault.derive(ShieldKeyVault.DERIVE_POLICY, buildId);
                 try {
-                    policy = ShieldPolicy.load(context, config, key);
+                    policy = ShieldPolicy.load(context, config, policyKey);
                 } catch (Exception error) {
                     fail("policy load failed: " + error);
                     return state;
+                } finally {
+                    java.util.Arrays.fill(policyKey, (byte) 0);
                 }
-                fileKey = ShieldPolicy.deriveFileKey(key, config.buildId);
-                nativeKey = ShieldPolicy.deriveNativeKey(key, config.buildId);
+                fileKey = ShieldKeyVault.derive(ShieldKeyVault.DERIVE_FILE, buildId);
+                nativeKey = ShieldKeyVault.derive(ShieldKeyVault.DERIVE_NATIVE, buildId);
+                byte[] rulesKey = ShieldKeyVault.derive(ShieldKeyVault.DERIVE_RULES, buildId);
                 // Load rules before native file hooks so the provenance log is
                 // visible even when the hooks intercept logging writes.
-                rules = ShieldRules.load(context, config, key);
+                rules = ShieldRules.load(context, config, rulesKey);
                 ShieldDetect.setYidunSignatures(
                         rules == null ? null : rules.yidunSignatures());
                 ShieldNativeIo.configure(context, config.maxNativeFileMb);
@@ -120,11 +134,14 @@ public final class ShieldRuntime {
                 ShieldEvents.init(context, config, fileKey);
                 ShieldDetectionBridge.register(context);
                 ShieldDetect.start(context, config);
-                ShieldRuleUpdater.start(context, config, key);
+                ShieldRuleUpdater.start(context, config, rulesKey);
                 ShieldFileWatch.start(context, config);
                 ShieldSelfCheck.start(context, config);
                 byte[] container = ShieldAssets.read(context, config.container);
-                byte[][] dex = ShieldContainer.open(container, key);
+                long containerStarted = SystemClock.elapsedRealtimeNanos();
+                byte[][] dex = ShieldKeyVault.openContainer(container);
+                Log.i(TAG, "native container open ms="
+                        + (SystemClock.elapsedRealtimeNanos() - containerStarted) / 1_000_000L);
                 ByteBuffer[] buffers = new ByteBuffer[dex.length];
                 for (int index = 0; index < dex.length; index++) {
                     buffers[index] = ByteBuffer.wrap(dex[index]);
@@ -136,15 +153,20 @@ public final class ShieldRuntime {
                 decryptMs = (SystemClock.elapsedRealtimeNanos() - started) / 1_000_000L;
                 Log.i(TAG, "dex loaded count=" + dexCount + " decryptMs=" + decryptMs
                         + " pssKb=" + pssKb() + " " + ShieldArt.describe());
+                if (config.core != null && !config.core.isEmpty()) {
+                    coreKey = ShieldKeyVault.derive(ShieldKeyVault.DERIVE_CORE, buildId);
+                }
             }
 
             ParcelFileDescriptor coreDescriptor = null;
-            if (config.core != null && !config.core.isEmpty() && contentKey != null) {
+            if (config.core != null && !config.core.isEmpty() && coreKey != null) {
                 try {
-                    coreDescriptor = ShieldCoreLoader.open(context, config, contentKey);
+                    coreDescriptor = ShieldCoreLoader.open(context, config, coreKey);
                     Log.i(TAG, "encrypted core opened fd=" + coreDescriptor.getFd());
                 } catch (Throwable error) {
                     Log.w(TAG, "encrypted core unavailable: " + error);
+                } finally {
+                    java.util.Arrays.fill(coreKey, (byte) 0);
                 }
             }
             int status = coreDescriptor != null

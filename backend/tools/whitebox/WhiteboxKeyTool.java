@@ -1,6 +1,8 @@
 package com.risid.wbaes;
 
+import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
+import java.io.DataOutputStream;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStreamReader;
@@ -102,10 +104,109 @@ public final class WhiteboxKeyTool {
         return out;
     }
 
+    private static void writeInt(DataOutputStream out, int value) throws Exception {
+        out.write(value & 0xFF);
+        out.write((value >>> 8) & 0xFF);
+        out.write((value >>> 16) & 0xFF);
+        out.write((value >>> 24) & 0xFF);
+    }
+
+    private static void expect(boolean condition, String message) {
+        if (!condition) {
+            throw new IllegalStateException(message);
+        }
+    }
+
+    /** Exports the Java object graph as the flat table the native vault reads. */
+    private static void export(String tablePath, String outPath) throws Exception {
+        AES aes = load(tablePath);
+        T1Box[][] t1 = aes.getT1();
+        T2Box[][] t2 = aes.getT2();
+        T3Box[][] t3 = aes.getT3();
+        XORCascade[][] xor = aes.getXor();
+        XORCascadeState[] xorState = aes.getXorState();
+        expect(t1.length == 2 && t2.length == 10 && t3.length == 10,
+                "unexpected round count");
+        for (int round = 0; round < t2.length; round++) {
+            expect(t2[round].length == 16 && t3[round].length == 16,
+                    "unexpected box count");
+        }
+        expect(xor.length == 10 && xorState.length == 2, "unexpected cascade count");
+
+        try (DataOutputStream out = new DataOutputStream(
+                new BufferedOutputStream(new FileOutputStream(outPath)))) {
+            out.write(new byte[]{'W', 'B', 'X', '1'});
+            writeInt(out, 1);
+            writeInt(out, 2 * 16 * 256 * 16);
+            writeInt(out, 10 * 16 * 256 * 4);
+            writeInt(out, 10 * 16 * 256 * 4);
+            writeInt(out, 10 * 8 * 3 * 8 * 256);
+            writeInt(out, 2 * 15 * 32 * 256);
+            writeInt(out, 0);
+
+            for (T1Box[] boxes : t1) {
+                for (T1Box box : boxes) {
+                    State[] rows = box.getTbl();
+                    expect(rows.length == 256, "unexpected T1 rows");
+                    for (State row : rows) {
+                        out.write(row.getState(), 0, 16);
+                    }
+                }
+            }
+            for (T2Box[] boxes : t2) {
+                for (T2Box box : boxes) {
+                    long[] rows = box.getTbl();
+                    expect(rows.length == 256, "unexpected T2 rows");
+                    for (long row : rows) {
+                        writeInt(out, (int) row);
+                    }
+                }
+            }
+            for (T3Box[] boxes : t3) {
+                for (T3Box box : boxes) {
+                    long[] rows = box.getTbl();
+                    expect(rows.length == 256, "unexpected T3 rows");
+                    for (long row : rows) {
+                        writeInt(out, (int) row);
+                    }
+                }
+            }
+            for (XORCascade[] cascades : xor) {
+                for (XORCascade cascade : cascades) {
+                    XORBox[] boxes = cascade.getX();
+                    expect(boxes.length == 3, "unexpected XOR boxes");
+                    for (XORBox box : boxes) {
+                        byte[][] rows = box.getTbl();
+                        expect(rows.length == 8, "unexpected XOR rows");
+                        for (byte[] row : rows) {
+                            out.write(row, 0, 256);
+                        }
+                    }
+                }
+            }
+            for (XORCascadeState cascade : xorState) {
+                XORBoxState[] boxes = cascade.getX();
+                expect(boxes.length == 15, "unexpected XOR state boxes");
+                for (XORBoxState box : boxes) {
+                    byte[][] rows = box.getTbl();
+                    expect(rows.length == 32, "unexpected XOR state rows");
+                    for (byte[] row : rows) {
+                        out.write(row, 0, 256);
+                    }
+                }
+            }
+        }
+    }
+
     public static void main(String[] args) throws Exception {
+        if (args.length == 3 && "export".equals(args[0])) {
+            export(args[1], args[2]);
+            return;
+        }
         if (args.length != 5) {
             System.err.println(
-                    "usage: wrap|unwrap table keyHex|- nonceHex out");
+                    "usage: wrap|unwrap table keyHex|- nonceHex out\n"
+                            + "       export table out");
             System.exit(2);
         }
         boolean wrap = "wrap".equals(args[0]);

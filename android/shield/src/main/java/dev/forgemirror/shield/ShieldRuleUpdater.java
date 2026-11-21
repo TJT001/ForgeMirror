@@ -27,27 +27,27 @@ final class ShieldRuleUpdater {
     private ShieldRuleUpdater() {
     }
 
-    static void start(Context context, ShieldConfig config, byte[] kContent) {
-        if (config.eventUrl == null || config.eventUrl.isEmpty() || kContent == null) {
+    static void start(Context context, ShieldConfig config, byte[] rulesKey) {
+        if (config.eventUrl == null || config.eventUrl.isEmpty() || rulesKey == null) {
             return;
         }
         if (!ShieldProcess.isMain(context)) {
             return;
         }
-        Thread thread = new Thread(() -> update(context, config, kContent),
+        Thread thread = new Thread(() -> update(context, config, rulesKey),
                 "shield-rule-update");
         thread.setDaemon(true);
         thread.start();
     }
 
-    private static void update(Context context, ShieldConfig config, byte[] kContent) {
+    private static void update(Context context, ShieldConfig config, byte[] rulesKey) {
         try {
             updateConfig(context, config);
         } catch (Exception error) {
             Log.w(TAG, "config update failed: " + error);
         }
         try {
-            updateRules(context, config, kContent);
+            updateRules(context, config, rulesKey);
         } catch (Exception error) {
             Log.w(TAG, "rules update failed: " + error);
         }
@@ -87,7 +87,7 @@ final class ShieldRuleUpdater {
         Log.i(TAG, "server config applied response=" + safe.optString("response"));
     }
 
-    private static void updateRules(Context context, ShieldConfig config, byte[] kContent)
+    private static void updateRules(Context context, ShieldConfig config, byte[] rulesKey)
             throws Exception {
         int current = ShieldRules.currentVersion(context, config);
         String url = config.eventUrl + "/api/v1/rules/latest?app_package="
@@ -97,7 +97,7 @@ final class ShieldRuleUpdater {
         if (body == null || body.length == 0) {
             return;
         }
-        ShieldRules parsed = ShieldRules.parsePackage(context, config, kContent, body);
+        ShieldRules parsed = ShieldRules.parsePackage(context, config, rulesKey, body);
         try {
             if (parsed.version <= current) {
                 Log.i(TAG, "remote rules not newer: " + parsed.version);

@@ -7,7 +7,9 @@ set(CMAKE_C_VISIBILITY_PRESET hidden)
 add_link_options(-Wl,-z,max-page-size=16384)
 add_library(shield_core SHARED core.cpp)
 add_library(shield_dummy SHARED dummy.cpp)
-add_library(shield_boot SHARED boot.cpp selfdecrypt.c native_loader.cpp elf_loader.cpp tls_runtime.cpp)
+add_library(shield_boot SHARED boot.cpp selfdecrypt.c native_loader.cpp elf_loader.cpp tls_runtime.cpp
+    vault/fm_sha256.c vault/fm_aes.c vault/fm_whitebox.c vault/fm_vault.c vault_jni.cpp)
+target_compile_options(shield_boot PRIVATE -O2)
 target_link_options(shield_boot PRIVATE -Wl,-init=fm_selfdecrypt_init -Wl,-u,fm_selfdecrypt_init)
 add_library(abi_compile_check OBJECT abi_compile_check.c)
 

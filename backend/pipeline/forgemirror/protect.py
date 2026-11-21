@@ -24,7 +24,7 @@ from .formats.selfdecrypt import add_dt_init_lzss
 from .formats.container import open_container
 from .formats.policy import pack_policy
 from .formats.rules import pack_rules
-from .formats.whitebox import wrap as wrap_whitebox
+from .formats.whitebox import export_table, wrap as wrap_whitebox
 from .formats.yara_rules import RUNTIME_RULES
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -428,7 +428,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
                 raise SystemExit("white-box table missing from pipeline data")
             table = table_path.read_bytes()
             nonce = os.urandom(12)
-            whitebox_entries["assets/shield/wbaes.table"] = table
+            whitebox_entries["assets/shield/wbaes.table"] = export_table(table)
             whitebox_entries["assets/shield/k_content.wb"] = wrap_whitebox(
                 table, k_content, nonce
             )

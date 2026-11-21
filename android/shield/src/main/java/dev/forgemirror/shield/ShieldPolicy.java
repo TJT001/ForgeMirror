@@ -21,12 +21,6 @@ final class ShieldPolicy {
     private static final int SIGNATURE_SIZE = 64;
     private static final int SIG_ED25519 = 1;
     private static final int SIG_ECDSA_P256_RAW = 2;
-    private static final byte[] POLICY_LABEL =
-            "FM/policy/v1".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
-    private static final byte[] FILE_LABEL =
-            "FM/files/v1".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
-    private static final byte[] NATIVE_LABEL =
-            "FM/native/v1".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
 
     private final List<Pattern> rules = new ArrayList<>();
     private final List<Pattern> excludes = new ArrayList<>();
@@ -34,9 +28,9 @@ final class ShieldPolicy {
     private ShieldPolicy() {
     }
 
-    static ShieldPolicy load(Context context, ShieldConfig config, byte[] kContent)
+    static ShieldPolicy load(Context context, ShieldConfig config, byte[] policyKey)
             throws Exception {
-        if (config.policy == null || config.policy.isEmpty() || kContent == null) {
+        if (config.policy == null || config.policy.isEmpty() || policyKey == null) {
             return null;
         }
         byte[] pkg;
@@ -68,12 +62,10 @@ final class ShieldPolicy {
         byte[] body = Arrays.copyOfRange(pkg, 0, pkg.length - SIGNATURE_SIZE);
         ShieldSignature.verify(context, config, sigAlg, signature, body);
 
-        byte[] buildId = uuidBytes(config.buildId);
-        byte[] key = ShieldCrypto.hkdf(kContent, buildId, POLICY_LABEL);
         byte[] nonce = Arrays.copyOfRange(pkg, 8, 20);
         byte[] ciphertext = Arrays.copyOfRange(
                 pkg, HEADER_SIZE, pkg.length - SIGNATURE_SIZE);
-        byte[] plaintext = ShieldCrypto.gcmDecrypt(key, nonce, ciphertext,
+        byte[] plaintext = ShieldCrypto.gcmDecrypt(policyKey, nonce, ciphertext,
                 Arrays.copyOfRange(pkg, 0, HEADER_SIZE));
 
         JSONObject json = new JSONObject(
@@ -108,14 +100,6 @@ final class ShieldPolicy {
                 .putLong(uuid.getMostSignificantBits())
                 .putLong(uuid.getLeastSignificantBits())
                 .array();
-    }
-
-    static byte[] deriveFileKey(byte[] kContent, String buildId) throws Exception {
-        return ShieldCrypto.hkdf(kContent, uuidBytes(buildId), FILE_LABEL);
-    }
-
-    static byte[] deriveNativeKey(byte[] kContent, String buildId) throws Exception {
-        return ShieldCrypto.hkdf(kContent, uuidBytes(buildId), NATIVE_LABEL);
     }
 
     boolean encrypts(String relPath) {

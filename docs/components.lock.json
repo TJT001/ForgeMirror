@@ -135,11 +135,11 @@
       "id": "JAVA-WBAES",
       "name": "Whitebox-crypto-AES (ph4r05/Risid Android port)",
       "version": "3795d66c450a1b48998ab38a752a35323ca4cc59",
-      "scope": "client",
+      "scope": "build",
       "status": "candidate",
       "license": "BSD-3-Clause",
       "pinned": true,
-      "notes": "Chow white-box AES-128 runtime and serialized table; retain LICENSE and class-name keep rules; fixed table for now"
+      "notes": "Chow white-box AES-128 reference used at build time to wrap the content key and export the WBX1 flat table; runtime is a native C port in libshield_boot"
     }
   ]
 }

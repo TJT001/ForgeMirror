@@ -10,7 +10,7 @@ from pathlib import Path
 
 MAGIC = b"WBK1"
 NONCE_SIZE = 12
-_TABLE_RELATIVE = Path("android/shield/src/main/java/com/risid/wbaes")
+_TABLE_RELATIVE = Path("backend/tools/whitebox/java/com/risid/wbaes")
 _TOOL = Path("backend/tools/whitebox/WhiteboxKeyTool.java")
 _CACHE = Path(tempfile.gettempdir()) / "forgemirror-wbaes"
 
@@ -62,6 +62,24 @@ def _classes() -> Path:
     if process.returncode != 0:
         raise RuntimeError(process.stderr[-1000:] or "javac failed")
     return target
+
+
+def export_table(table: bytes) -> bytes:
+    classes = _classes()
+    with tempfile.TemporaryDirectory(prefix="fm-wbaes-") as temporary:
+        tmp = Path(temporary)
+        table_path = tmp / "wbaes.table"
+        output = tmp / "wbaes.flat"
+        table_path.write_bytes(table)
+        command = [
+            _java_tool("java"), "-cp", str(classes),
+            "com.risid.wbaes.WhiteboxKeyTool", "export",
+            str(table_path), str(output),
+        ]
+        process = subprocess.run(command, capture_output=True, text=True)
+        if process.returncode != 0:
+            raise RuntimeError(process.stderr[-1000:] or "white-box export failed")
+        return output.read_bytes()
 
 
 def wrap(table: bytes, key: bytes, nonce: bytes) -> bytes:

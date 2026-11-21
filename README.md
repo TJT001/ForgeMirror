@@ -14,7 +14,7 @@
 
 ## 当前状态
 
-- Android：容器 v2、内存 DEX/ELF 加载、动态 TLS、白盒化内容密钥、Dobby（x86_64）/ShadowHook（arm/arm64）后端、16 KB 页、透明文件保护、PKR1 规则包、运行时检测与事件队列均已实现并有设备/主机证据。
+- Android：容器 v2、内存 DEX/ELF 加载、动态 TLS、native 白盒内容密钥与容器解密、Dobby（x86_64）/ShadowHook（arm/arm64）后端、16 KB 页、透明文件保护、PKR1 规则包、运行时检测与事件队列均已实现并有设备/主机证据。
 - 检测：通用 `env_*` 规则 + 易盾来源的 `yidun_*` 规则；签名特征可随 PKR1 下发并在下次进程启动生效，已实测 v2→v3→v4 远程更新、篡改拒绝和版本门控。
 - 后端：Go API、PostgreSQL、认证/事件/规则/配置接口已实现；PKR1 上传与版本门控可用。
 - 流水线：S0–S8、APK/AAB、universal/default split、多 device-spec 批量、容器/策略/规则/清单、16 KB 对齐与 S8 闸门均有测试覆盖。

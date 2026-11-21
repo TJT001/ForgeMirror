@@ -1,65 +1,77 @@
-# 2026-11-21 P2：白盒化内容密钥
+# 2026-11-21 P2：白盒化内容密钥（native）
 
 ## 范围
 
-给内嵌的 32 字节 `K_content` 增加白盒包裹层：构建期不再写
-`assets/shield/k_content.bin` 明文，而是写 `k_content.wb`（CTR 包裹块）和
-Chow 白盒 AES 表；运行时只在解包阶段恢复内容密钥，再进入现有 HKDF/AES-GCM 链路。
+内嵌的 32 字节 `K_content` 不再以明文写入 APK。构建期用 Chow 白盒 AES 表
+把内容密钥包成 `WBK1`，并在保护时把白盒表导出为紧凑的 `WBX1` 二进制；运行时
+在 `libshield_boot.so` 内完成解包、HKDF 派生和 FDX2 容器解密。Java 线程
+拿不到根密钥，只拿到按用途派生的密钥和明文 DEX。
 
 ## 实现
 
 | 位置 | 内容 |
 |---|---|
-| `com.risid.wbaes` | 引入 ph4r05/Risid 的 Chow 白盒 AES-128 运行时（BSD-3），保留版权头与 LICENSE |
-| `formats/data/wbaes.table` | 白盒 AES 表（Java 序列化），只作为构建期输入；保护时注入 `assets/shield/wbaes.table` |
-| `formats/whitebox.py` | 构建期编译 `WhiteboxKeyTool`，用白盒表对 nonce/counter 生成 CTR keystream，包裹 `K_content` |
-| `protect.py --whitebox-key` | 写 `assets/shield/k_content.wb`、`assets/shield/wbaes.table`；config 的 `key` 指向 `.wb`；不支持时失败/告警 |
-| `ShieldWhitebox.java` | 从 assets 反序列化表（仅允许 `com.risid.wbaes.*`）、生成 keystream、解包并校验 `WBK1` 布局 |
-| `ShieldRuntime` | 读到 `WBK1` 时先解包，再派生 file/native/core key |
+| `backend/tools/whitebox/java/com/risid/wbaes` | Chow 白盒 AES-128 运行时（BSD-3），仅构建期使用，不再进入 App DEX |
+| `formats/data/wbaes.table` | 白盒表原始 Java 序列化数据，仅作为构建输入 |
+| `formats/whitebox.py` | `export_table()` 生成 `WBX1` 扁平表；`wrap()` 生成 `WBK1` 包裹块；均调用同一套构建期 Java 工具 |
+| `cpp/vault/fm_whitebox.c` | 解析 `WBX1`，按 T1/T2/T3、XOR 级联与 XORState 级联还原白盒 AES，生成 CTR keystream 并解包 `WBK1` |
+| `cpp/vault/fm_aes.c` / `fm_sha256.c` | 自带 AES-256-GCM、SHA-256、HMAC-SHA256、HKDF；容器 TOC/分块解密与逐文件摘要校验 |
+| `cpp/vault/fm_vault.c` | 安装根密钥、按标签派生 policy/file/native/rules/core key、解析 FDX2 |
+| `cpp/vault_jni.cpp` + `ShieldKeyVault.java` | JNI 边界：白盒解包、派生、容器解密 |
+| `ShieldRuntime` | 读 `k_content.wb` 后调用 native 安装；policy/rules/core 改为接收派生密钥；DEX 由 native 返回 |
 | API / worker / 前端 | `whitebox` 选项透传；界面“白盒密钥库”开关默认开启 |
 
-### 包裹格式
+### 数据格式
 
 ```text
-WBK1 | nonce(12) | ciphertext(32)
-keystream = WBAES_Encrypt(table, nonce || counter_be32) 逐块
-ciphertext = K_content XOR keystream
+WBK1 | nonce(12) | ciphertext(32)        # 内容密钥包裹块
+WBX1 | version | t1/t2/t3/xor/xorstate   # 扁平白盒表，1,196,064 字节
 ```
 
-构建期 Python 不保存白盒 AES 密钥；它只调用白盒表完成加密。运行时也不需要
-`K_content` 以外的白盒密钥。
+### 密钥边界
+
+```text
+assets/shield/k_content.wb ──┐
+assets/shield/wbaes.table  ──┼─> libshield_boot: 解包 -> K_content（仅 native）
+                              │        ├─ HKDF("FM/policy/v1") -> Java policy
+                              │        ├─ HKDF("FM/files/v1")  -> Java 文件层
+                              │        ├─ HKDF("FM/native/v1") -> Java native 层
+                              │        ├─ HKDF("FM/rules/v1")  -> Java rules
+                              │        └─ HKDF("FM/core/v1")   -> Java core
+                              └─> FDX2 解密 -> 明文 DEX 交给 ART
+```
+
+`K_content` 只在 native 全局缓冲区中存在；Java 侧只持有派生密钥。容器解密
+的完整性由 GCM tag、逐文件 SHA-256 与 TOC 边界检查共同保证。
 
 ## 验证
 
-- `protect --whitebox-key` 产物（APK 内只有注入后的两份资产，无根级重复表）：
+- 构建产物：
   ```text
   assets/shield/k_content.wb       48 B
-  assets/shield/wbaes.table        1.7 MB
-  config.key = shield/k_content.wb
+  assets/shield/wbaes.table        1,196,064 B (WBX1)
   无 assets/shield/k_content.bin、无 assets/wbaes.table
   ```
-- Pixel 5 / API 30 安装运行（主进程与 `:remote` 进程均验证）：
+- 主机向量（`backend/tests/vectors/vault`）：白盒解包、5 个 HKDF 标签、
+  12.7 MB 多分块容器、空文件、篡改容器/密钥均通过。
+- Pixel 5 / API 30：
   ```text
-  ShieldRuntime: content key unwrapped from white-box vault
-  ShieldRuntime: dex loaded count=9 decryptMs=453 adapter=art-29+
-  ShieldRuntime: bootstrap ok state=4 metrics bootstrapMs=559
-  MainActivity: probe writeErr=0 readErr=0 mmapErr=0 syscallErr=0 textErr=0
-    native=T2XYZ6 java=T2XYZ6 dependency=7 dlopen=7 lockErr=0 overload=11/12
+  ShieldRuntime: content key unwrapped in native white-box vault ms=4
+  ShieldRuntime: native container open ms=359
+  ShieldRuntime: dex loaded count=8 decryptMs=656
+  ShieldRuntime: bootstrap ok state=4 metrics bootstrapMs=773
+  MainActivity: probe ... native=T2XYZ6 java=T2XYZ6 dependency=7 dlopen=7 lockErr=0
   ```
-- S8 gate 通过；白盒表与包裹块均纳入签名清单/产物校验。stub DEX 因白盒运行时
-  增至约 220 KB，`a2_no_plaintext_dex` 的 stub 上限相应调整到 320 KB，仍远低于
-  正常业务 DEX。
+- 主进程与 `:remote` 进程均走 native 解包；S8 gate 全部通过。
 
 ## 限制
 
-1. 当前使用固定开源白盒表，表本身会随 APK 分发；它隐藏的是 `K_content` 的
-   明文存储，不是完整的“所有 AES 操作白盒化”。运行时仍会在进程内短暂恢复
-   `K_content` 供 HKDF 和 AES-GCM 使用。
-2. 表为 Java 序列化格式，运行时依赖 `com.risid.wbaes` 类名，已加 consumer
-   ProGuard keep；反序列化只接受 `com.risid.wbaes.*` 与基本类型数组。表只存在于
-   后端构建数据和保护后的 `assets/shield/`，不再随 shield AAR 进入普通 APK。
-3. 构建期需要 JDK（`JAVA_HOME/bin/javac` 和 `java`）；无 JDK 时白盒选项失败，
-   不会静默退回明文。
-4. 每构建表目前相同，尚未做按构建随机生成白盒表；后续可接生成器做表多样化。
-5. 表约 1.7 MB，会增加 APK/AAR 体积；CTR 包裹只保护嵌入密钥，不替代清单签名、
-   GCM 认证和授权链路。
+1. 白盒表是公开固定表，分发在 APK 内；它隐藏的是根密钥的明文存储，不是完整
+   的白盒 AES-GCM。运行时仍会在 native 内存短暂持有 `K_content`。
+2. native 代码可被 Frida/native hook 或内存 dump 分析；相比 Java 层显著抬高门槛，
+   但不是绝对防护。后续可接表随机化、表加密与 `mlock`。
+3. 构建期需要 JDK（`javac`/`java`），用于白盒包裹和 `WBX1` 导出；无 JDK 时
+   白盒选项失败，不会退回明文。
+4. debug 变体 NDK 默认 `-O0`，`shield_boot` 显式加 `-O2`；否则纯 C 实现在
+   设备上会慢约 40 倍。
+5. `ShieldCrypto` 仍负责 policy/rules/core 的 GCM 解密，但只接收派生密钥。

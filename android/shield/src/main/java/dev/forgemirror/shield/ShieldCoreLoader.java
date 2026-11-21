@@ -8,21 +8,19 @@ import android.system.OsConstants;
 
 import java.io.FileDescriptor;
 import java.io.FileNotFoundException;
-import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
 /** Decrypts the per-ABI encrypted shield core and exposes it as a memfd. */
 final class ShieldCoreLoader {
     static final byte[] MAGIC = {'F', 'M', 'C', '1'};
-    private static final byte[] LABEL = "FM/core/v1".getBytes(StandardCharsets.US_ASCII);
 
     private ShieldCoreLoader() {
     }
 
-    static ParcelFileDescriptor open(Context context, ShieldConfig config, byte[] kContent)
+    static ParcelFileDescriptor open(Context context, ShieldConfig config, byte[] coreKey)
             throws Exception {
-        if (config.core == null || config.core.isEmpty() || kContent == null) {
+        if (config.core == null || config.core.isEmpty() || coreKey == null) {
             return null;
         }
         for (String abi : abis(context)) {
@@ -43,8 +41,6 @@ final class ShieldCoreLoader {
             byte[] nonce = java.util.Arrays.copyOfRange(blob, 4, 16);
             byte[] ciphertext = java.util.Arrays.copyOfRange(blob, 16, blob.length);
             byte[] aad = java.util.Arrays.copyOfRange(blob, 0, 16);
-            byte[] coreKey = ShieldCrypto.hkdf(
-                    kContent, ShieldPolicy.uuidBytes(config.buildId), LABEL);
             byte[] plaintext = ShieldCrypto.gcmDecrypt(coreKey, nonce, ciphertext, aad);
             FileDescriptor fd = Os.memfd_create("fm-core", 0);
             int offset = 0;

@@ -30,6 +30,10 @@ class WhiteboxWrapTests(unittest.TestCase):
         self.assertEqual(blob[4:16], nonce)
         self.assertNotEqual(blob[16:], key)
 
+        flat = whitebox.export_table(table)
+        self.assertEqual(flat[:4], b"WBX1")
+        self.assertEqual(len(flat), 32 + 1_196_032)
+
         with tempfile.TemporaryDirectory() as temporary:
             wrapped = Path(temporary) / "wrapped.bin"
             wrapped.write_bytes(blob)

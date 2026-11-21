@@ -1,0 +1,14 @@
+{
+  "files": [
+    "classes.dex",
+    "classes2.dex",
+    "empty.bin"
+  ],
+  "derive_ids": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ]
+}
