@@ -290,7 +290,7 @@ async function cancel() {
         </svg>
         <div class="brand-text">
           <span class="brand-name">ForgeMirror</span>
-          <span class="brand-sub">授权加固工作台</span>
+          <span class="brand-sub">Android应用加固平台</span>
         </div>
       </div>
       <div class="topbar-meta">
