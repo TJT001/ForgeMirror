@@ -222,6 +222,12 @@ def protect_apk(
                                            min=1, max=4096),
     whitebox: bool = typer.Option(False, "--whitebox-key/--no-whitebox-key",
                                   help="Wrap the embedded content key with the white-box AES vault."),
+    ai_decoy: bool = typer.Option(
+        False, "--ai-decoy/--no-ai-decoy",
+        help="Inject unused security-themed decoy classes into the stub DEX."),
+    ai_decoy_lexicon: Path | None = typer.Option(
+        None, "--ai-decoy-lexicon", exists=True, dir_okay=False,
+        readable=True, help="JSON lexicon for the decoy class names."),
     progress_file: Path | None = typer.Option(
         None, "--progress-file", dir_okay=False,
         help="Append stage progress as JSON lines for the worker event stream."),
@@ -338,6 +344,8 @@ def protect_apk(
                 response=response,
                 max_native_file_mb=max_native_file_mb,
                 whitebox=whitebox,
+                ai_decoy=ai_decoy,
+                ai_decoy_lexicon=ai_decoy_lexicon,
                 alg=alg,
                 splits=effective_splits,
                 progress_file=progress_file,

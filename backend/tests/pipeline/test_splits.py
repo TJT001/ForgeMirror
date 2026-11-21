@@ -298,7 +298,7 @@ class ProtectSplitTests(unittest.TestCase):
                             return_value=(DEX, {
                                 "lib/arm64-v8a/libshield_boot.so": b"boot",
                                 "lib/arm64-v8a/libshield_dummy.so": b"dummy",
-                            })):
+                            }, 0)):
                 result = protect(ProtectOptions(
                     apk=base, container=container, key_file=key_file,
                     out=tmp / "protected.apk", build_id=BUILD_ID, aar=aar,

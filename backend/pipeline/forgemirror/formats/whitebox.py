@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import hashlib
-import os
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+
+from .jdk import java_tool as _java_tool
+from .jdk import jdk_home as _jdk_home
 
 MAGIC = b"WBK1"
 NONCE_SIZE = 12
@@ -17,28 +18,6 @@ _CACHE = Path(tempfile.gettempdir()) / "forgemirror-wbaes"
 
 def _root() -> Path:
     return Path(__file__).resolve().parents[4]
-
-
-def _jdk_home() -> Path:
-    candidates: list[Path] = []
-    if os.environ.get("JAVA_HOME"):
-        candidates.append(Path(os.environ["JAVA_HOME"]))
-    candidates.extend([
-        Path("/opt/homebrew/opt/openjdk"),
-        Path("/usr/lib/jvm/default-java"),
-    ])
-    javac = shutil.which("javac")
-    if javac:
-        candidates.append(Path(javac).resolve().parent.parent)
-    for candidate in candidates:
-        if (candidate / "bin" / "javac").is_file() and (
-                candidate / "bin" / "java").is_file():
-            return candidate
-    raise RuntimeError("a JDK is required for white-box key wrapping; set JAVA_HOME")
-
-
-def _java_tool(name: str) -> str:
-    return str(_jdk_home() / "bin" / name)
 
 
 def _classes() -> Path:

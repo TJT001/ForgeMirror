@@ -1,0 +1,46 @@
+{
+  "schema": "forgemirror.ai-decoy/1",
+  "package": "com.dexguard.decoy.symbols",
+  "classes": [
+    "Ransomware",
+    "Keylogger",
+    "Botnet",
+    "Rootkit",
+    "ExploitKit",
+    "Backdoor",
+    "Dropper",
+    "Crypter",
+    "Injector",
+    "Stealer",
+    "Wiper",
+    "Miner",
+    "Implant",
+    "Beacon",
+    "Shellcode",
+    "Payload",
+    "C2Channel",
+    "Exfiltrator",
+    "Persistence",
+    "PrivilegeEscalation",
+    "CredentialHarvester",
+    "LateralMovement",
+    "PayloadStager",
+    "CommandControl"
+  ],
+  "fields": [
+    "payloadStage",
+    "beaconProfile",
+    "exfilQueue",
+    "persistencePath",
+    "c2Endpoint",
+    "injectionTarget",
+    "credentialStore",
+    "stagerChannel"
+  ],
+  "strings": [
+    "stage-two",
+    "beacon-profile",
+    "credential-cache",
+    "persistence-hook"
+  ]
+}

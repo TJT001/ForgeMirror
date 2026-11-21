@@ -62,6 +62,16 @@ Web 界面与 CLI 均提供对应开关。
    - 根密钥不回到 Java；Java 只持有派生密钥，用完清零
    - 表格式、长度与魔数严格校验，解包失败直接 fail-closed
 
+## 实验性：语义诱饵
+
+默认关闭，用于研究 AI/自动化分析噪音，不属于上面的 7 个核心保护层。
+
+- 词表驱动：默认词表只含网络安全术语，可用 `--ai-decoy-lexicon` 替换
+- 构建期 `javac --release 11` 生成未使用的 decoy 类，合并进 `classes.jar` 后随 stub DEX 打包
+- 类仅包含静态字符串和 getter，运行时不引用、不加载，App 行为不变
+- 开关贯通 CLI / API / worker / Web 界面，默认关闭
+- 不保证任何模型终止分析；可能引起应用商店或 EDR 误报，仅在研究场景开启
+
 ## 技术选型
 
 Vue 3 + TypeScript + Vite；Go + Gin + PostgreSQL/pgx；Python worker 与流水线；Android Java + C++17。详见 [架构选型](docs/架构选型.md)。

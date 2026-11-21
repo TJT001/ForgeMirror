@@ -24,6 +24,7 @@ from .formats.selfdecrypt import add_dt_init_lzss
 from .formats.container import open_container
 from .formats.policy import pack_policy
 from .formats.rules import pack_rules
+from .formats.ai_decoy import build_decoy_jar, merge_jar
 from .formats.whitebox import export_table, wrap as wrap_whitebox
 from .progress import emit as emit_progress
 from .formats.yara_rules import RUNTIME_RULES
@@ -124,10 +125,15 @@ class ProtectOptions:
     response: str = "toast"
     max_native_file_mb: int = 128
     whitebox: bool = False
+    ai_decoy: bool = False
+    ai_decoy_lexicon: Path | None = None
     progress_file: Path | None = None
 
 
-def _stub_from_aar(aar: Path, tools: AndroidTools, tmp: Path) -> tuple[bytes, dict[str, bytes]]:
+def _stub_from_aar(aar: Path, tools: AndroidTools, tmp: Path,
+                   ai_decoy: bool = False,
+                   lexicon: Path | None = None
+                   ) -> tuple[bytes, dict[str, bytes], int]:
     with zipfile.ZipFile(aar) as archive:
         classes_jar = tmp / "classes.jar"
         classes_jar.write_bytes(archive.read("classes.jar"))
@@ -141,8 +147,15 @@ def _stub_from_aar(aar: Path, tools: AndroidTools, tmp: Path) -> tuple[bytes, di
             libs[f"lib/{parts[1]}/{parts[2]}"] = archive.read(name)
     if not libs:
         raise SystemExit(f"shield AAR has no native libs: {aar}")
+    decoy_classes = 0
+    if ai_decoy:
+        decoy_jar = tmp / "ai-decoy.jar"
+        decoy_classes = build_decoy_jar(lexicon, decoy_jar)
+        merged = tmp / "classes-decoy.jar"
+        merge_jar(classes_jar, decoy_jar, merged)
+        classes_jar = merged
     stub = tools.dex_jar(classes_jar, tmp / "stub").read_bytes()
-    return stub, libs
+    return stub, libs, decoy_classes
 
 
 def _rewrite_zip(source: Path, target: Path, entries: dict[str, bytes],
@@ -317,7 +330,11 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
     emit_progress(options.progress_file, "s5", "running", 46, "native 库处理")
     with tempfile.TemporaryDirectory(prefix="fm-protect-") as tmp:
         tmp = Path(tmp)
-        stub_dex, shield_libs = _stub_from_aar(options.aar, tools, tmp)
+        stub_dex, shield_libs, decoy_classes = _stub_from_aar(
+            options.aar, tools, tmp, options.ai_decoy, options.ai_decoy_lexicon)
+        if decoy_classes:
+            warnings.append(
+                f"W_AI_DECOY: injected {decoy_classes} unused decoy classes")
         shield_libs = {
             name: data for name, data in shield_libs.items()
             if (("armeabi-v7a" if name.split("/")[1] == "armeabi"
@@ -619,6 +636,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
         "signed": signed,
         "stripped_libs": stripped_count,
         "whitebox": options.whitebox and not options.no_key_asset,
+        "ai_decoy_classes": decoy_classes,
         "key_asset": key_asset,
         "split_count": len(split_outputs),
         "splits": split_outputs,
