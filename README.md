@@ -20,9 +20,21 @@
 - 流水线：S0–S8、APK/AAB、universal/default split、多 device-spec 批量、容器/策略/规则/清单、16 KB 对齐与 S8 闸门均有测试覆盖。
 - 前端：上传/加固选项/任务进度/产物下载/安全事件页面已实现，已与 API/worker 联调。
 
+## 保护层（7 个核心功能）
+
+Web 界面与 CLI 均提供对应开关。
+
+1. **Core 自解密**：`libshield_core.so` 构建期 AES-GCM 加密并从 APK 移除；运行时按 ABI 解密到 memfd，由自研 ELF loader 内存加载。
+2. **双 PT_DYNAMIC 诱饵**：保留伪动态表与真实表并存，可与 section 名表破坏叠加，增加静态还原歧义。
+3. **破坏 section 名表**：构建期改写 ELF section 名称，保留动态链接所需结构，不影响运行。
+4. **Text 段自解密**：boot / hook / yara 的 `.text` 构建期 LZSS 压缩加密，`DT_INIT` 运行时自解密并恢复执行权限。
+5. **运行时检测**：环境、Root、注入、Hook 框架与 YARA 规则扫描；PKR1 规则包远程更新、签名校验、版本门控与事件上报；响应模式 `log` / `toast` / `degrade` / `block`。
+6. **内置内容密钥**：32 字节内容密钥随包分发，派生容器、策略、规则、core 与文件层密钥；关闭后改走授权服务在线取钥。
+7. **白盒密钥库**：Chow 白盒 AES 表包裹内容密钥（`WBK1`），native 解包 + HKDF + FDX2 解密；根密钥不回到 Java，Java 只拿派生密钥。
+
 ## 技术选型
 
-Vue 3 + TypeScript + Vite + Element Plus；Go + Gin + PostgreSQL/pgx；Python worker 与流水线；Android Java + C++17。详见 [架构选型](docs/架构选型.md)。
+Vue 3 + TypeScript + Vite；Go + Gin + PostgreSQL/pgx；Python worker 与流水线；Android Java + C++17。详见 [架构选型](docs/架构选型.md)。
 
 ## 常用验证
 
