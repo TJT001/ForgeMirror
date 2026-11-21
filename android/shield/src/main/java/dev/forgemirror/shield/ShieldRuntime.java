@@ -99,6 +99,11 @@ public final class ShieldRuntime {
                 }
                 fileKey = ShieldPolicy.deriveFileKey(key, config.buildId);
                 nativeKey = ShieldPolicy.deriveNativeKey(key, config.buildId);
+                // Load rules before native file hooks so the provenance log is
+                // visible even when the hooks intercept logging writes.
+                rules = ShieldRules.load(context, config, key);
+                ShieldDetect.setYidunSignatures(
+                        rules == null ? null : rules.yidunSignatures());
                 ShieldNativeIo.configure(context, config.maxNativeFileMb);
                 try {
                     int hookStatus = ShieldNativeFileHook.configure(
@@ -108,7 +113,6 @@ public final class ShieldRuntime {
                 } catch (Throwable error) {
                     Log.w(TAG, "native file hooks unavailable: " + error);
                 }
-                rules = ShieldRules.load(context, config, key);
                 ShieldEvents.init(context, config, fileKey);
                 ShieldDetectionBridge.register(context);
                 ShieldDetect.start(context, config);

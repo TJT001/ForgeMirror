@@ -3,6 +3,8 @@ package dev.forgemirror.shield;
 import android.content.Context;
 import android.util.Log;
 
+import dev.forgemirror.shield.yidun.YidunSignatures;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -37,12 +39,19 @@ final class ShieldRules {
 
     private final List<Rule> rules;
     private final ShieldYara yara;
+    private final YidunSignatures yidun;
     final int version;
 
-    private ShieldRules(List<Rule> rules, ShieldYara yara, int version) {
+    private ShieldRules(List<Rule> rules, ShieldYara yara, int version,
+                        YidunSignatures yidun) {
         this.rules = rules;
         this.yara = yara;
         this.version = version;
+        this.yidun = yidun;
+    }
+
+    YidunSignatures yidunSignatures() {
+        return yidun;
     }
 
     static ShieldRules load(Context context, ShieldConfig config, byte[] kContent) {
@@ -109,6 +118,13 @@ final class ShieldRules {
             if (!"forgemirror.rules/1".equals(json.optString("schema"))) {
                 throw new SecurityException("unsupported rules schema");
             }
+            YidunSignatures yidun = null;
+            JSONObject yidunJson = json.optJSONObject("yidun");
+            if (yidunJson != null) {
+                yidun = YidunSignatures.parse(yidunJson);
+                Log.i(TAG, "yidun signatures vendor=" + yidun.vendor
+                        + " sample=" + yidun.sampleSha256);
+            }
             List<Rule> rules = new ArrayList<>();
             JSONArray items = json.getJSONArray("rules");
             for (int index = 0; index < items.length(); index++) {
@@ -133,7 +149,7 @@ final class ShieldRules {
                     Log.w(TAG, "YARA unavailable: " + error);
                 }
             }
-            return new ShieldRules(rules, yara, ruleVersion);
+            return new ShieldRules(rules, yara, ruleVersion, yidun);
         }
     }
 

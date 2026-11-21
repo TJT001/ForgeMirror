@@ -123,6 +123,15 @@ final class ShieldRuleUpdater {
             case "env_root":
             case "env_emulator":
             case "file_tamper":
+            case "yidun_root":
+            case "yidun_mount":
+            case "yidun_debug":
+            case "yidun_hook":
+            case "yidun_xposed":
+            case "yidun_injection":
+            case "yidun_emulator":
+            case "yidun_ld_preload":
+            case "yidun_dex":
                 return true;
             default:
                 return false;

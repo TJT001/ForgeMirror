@@ -42,6 +42,24 @@ from .tools import AndroidTools
 
 DEX_RE = re.compile(r"^classes\d*\.dex$")
 
+YIDUN_SIGNATURE_ASSET = (
+    Path(__file__).resolve().parents[3]
+    / "android" / "shield" / "src" / "main" / "assets" / "yidun-signatures.json"
+)
+
+
+def _load_yidun_signatures() -> dict:
+    try:
+        with YIDUN_SIGNATURE_ASSET.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except OSError as exc:
+        raise RuntimeError(
+            f"Yidun signature asset missing: {YIDUN_SIGNATURE_ASSET}"
+        ) from exc
+    if not isinstance(data, dict):
+        raise RuntimeError("Yidun signature asset must be a JSON object")
+    return data
+
 DEFAULT_POLICY = {
     "schema": "forgemirror.policy/1",
     "version": 1,
@@ -58,7 +76,7 @@ DEFAULT_POLICY = {
 
 DEFAULT_RULES = {
     "schema": "forgemirror.rules/1",
-    "version": 1,
+    "version": 2,
     "min_shell_version": "0.1.0",
     "yara": RUNTIME_RULES,
     "rules": [
@@ -73,6 +91,7 @@ DEFAULT_RULES = {
             "strings": ["frida", "FRIDA"],
         },
     ],
+    "yidun": _load_yidun_signatures(),
 }
 
 
@@ -413,7 +432,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             "event_token": options.event_token,
             "detection": True,
             "response": "toast",
-            "rules_version": 1,
+            "rules_version": DEFAULT_RULES["version"],
             "cert_sha256": cert,
             "max_native_file_mb": 128,
             "core": "shield/core" if core_assets else "",

@@ -42,6 +42,7 @@ final class ShieldDetect {
     private static final String[] BUILD = decode("3d12fad4bc826b2f273209f5d7a79f7f203400eac1dca89d7d412963e1ccafba96726b220ae0a2b3809064333116fed4a7887048513572f2dda3886f4f300877e8d6ba92665e");
     private static final AtomicBoolean STARTED = new AtomicBoolean();
     private static final AtomicBoolean DEBUGGER_REPORTED = new AtomicBoolean();
+    private static volatile YidunSignatures pkr1Yidun;
 
     private ShieldDetect() {
     }
@@ -120,6 +121,17 @@ final class ShieldDetect {
         return findings;
     }
 
+    /** PKR1-carried signatures take precedence over the bundled asset. */
+    static void setYidunSignatures(YidunSignatures signatures) {
+        pkr1Yidun = signatures;
+        if (signatures == null || signatures.isEmpty()) {
+            Log.i(TAG, "no yidun signatures in pkr1; asset fallback");
+        } else {
+            Log.i(TAG, "yidun signatures injected from pkr1 vendor="
+                    + signatures.vendor + " sample=" + signatures.sampleSha256);
+        }
+    }
+
     /**
      * Yidun-derived probes live in the {@code yidun} package and emit
      * {@code yidun_*} rule IDs so events keep their provenance. Evidence
@@ -127,10 +139,17 @@ final class ShieldDetect {
      */
     private static void scanYidun(Context context, List<Finding> findings,
                                   Set<String> seen) {
-        YidunSignatures signatures = YidunSignatures.load(context);
+        YidunSignatures signatures = pkr1Yidun;
+        boolean fromRules = signatures != null && !signatures.isEmpty();
+        if (!fromRules) {
+            signatures = YidunSignatures.load(context);
+        }
         if (signatures.isEmpty()) {
             return;
         }
+        Log.i(TAG, "yidun signatures source=" + (fromRules ? "pkr1" : "asset")
+                + " vendor=" + signatures.vendor
+                + " sample=" + signatures.sampleSha256);
         Set<String> evidenceSeen = new LinkedHashSet<>();
         for (Finding finding : findings) {
             evidenceSeen.add(finding.evidence);

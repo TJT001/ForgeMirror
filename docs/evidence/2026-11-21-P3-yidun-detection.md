@@ -36,6 +36,35 @@
 - OLLVM/VM 解释器（结论为 JNI 编组器）；
 - 风险文案与 `NEDialog` UI。
 
+### PKR1 下发
+
+- `backend/pipeline/forgemirror/formats/rules.py`：PKR1 载荷新增可选 `yidun` 段；构建与加载都校验 schema、`source`（vendor/library/sample_sha256/evidence）、字符串长度、列表上限和嵌套深度；非法段整包拒绝。
+- `backend/pipeline/forgemirror/protect.py`：默认规则包读取 `android/shield/src/main/assets/yidun-signatures.json`，随 `rules.pkr` 下发；规则版本升到 2，`config.rules_version` 同步。
+- `ShieldRules`：把 `yidun` 段解析为 `YidunSignatures`，签名、解密、版本门控不变。
+- `ShieldRuntime`：在检测启动前把 PKR1 特征注入 `ShieldDetect`。
+- `ShieldDetect`：优先使用 PKR1 特征，缺失或为空时回退内置资产；日志 `source=pkr1|asset` 标明来源。
+- `ShieldRuleUpdater`：服务端可为 `yidun_*` 规则单独配置响应。
+
+端到端验证（Pixel 5 / Android 11）：
+
+```text
+protect 输出 rules.pkr version=2；open_rules 解出
+  yidun vendor=NetEase Yidun su=28 emu_paths=54 dex_magic=8
+
+设备日志：
+ShieldRules: yidun signatures vendor=NetEase Yidun sample=8ff...
+ShieldRules: loaded 2 rules version=2
+ShieldDetect: yidun signatures injected from pkr1 vendor=NetEase Yidun ...
+ShieldDetect: yidun signatures source=pkr1 vendor=NetEase Yidun ...
+ShieldRuntime: native file hooks status=0
+ShieldRuntime: dex loaded count=8 ...
+ShieldRuntime: bootstrap ok state=4
+ShieldDetect: finding yidun_root /system_ext/bin/su
+ShieldDetect: finding yidun_mount mount:magisk:...
+```
+
+规则加载已前移到 native 文件钩子配置之前，确保来源日志可见；`source=pkr1` 证明运行时使用的是 PKR1 特征而不是内置资产。验证用的 protected APK 在 `artifacts/pkr1-yidun/`（git 忽略）。
+
 ## 验证（本项目实测）
 
 ```text
@@ -51,6 +80,19 @@ YidunProbeTest                 7 项
 YidunSignaturesAssetTest       1 项
 合计                          48 项，0 失败
 ```
+
+PKR1 测试：
+
+```text
+backend/tests/pipeline/test_rules.py  9 项，0 失败
+  含 yidun roundtrip、bad schema、missing source、bad leaf、真实资产往返
+
+设备端 YidunProbeDeviceTest
+  pkr1PayloadParsesWithProvenance       通过
+  pkr1PayloadWithoutSourceIsRejected    通过
+```
+
+完整检查：`backend/pipeline/scripts/check.sh` 通过（容器向量、Python 88 项、C++ 向量、Gradle assemble）。
 
 JSON 结构校验：
 
@@ -104,4 +146,4 @@ ANDROID_SERIAL=<serial> ./gradlew :app:connectedDebugAndroidTest \
 ## 下一步
 
 1. 扩充设备矩阵：至少覆盖一个非 root 真机、一个厂商 ROM 和一个 32 位 ABI，确认无误报。
-2. 把易盾增量特征接入 PKR1 规则包版本门控，支持远程更新。
+2. Yidun 特征更新的回滚与灰度策略，以及服务端规则版本与清单 `rule_version` 的一致性。

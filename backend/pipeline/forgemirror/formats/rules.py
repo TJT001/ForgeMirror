@@ -23,6 +23,10 @@ MAX_PLAINTEXT = 1 << 20
 MAX_RULES = 256
 MAX_STRINGS = 32
 LABEL = b"FM/rules/v1"
+YIDUN_SCHEMA = "forgemirror.yidun-signatures/1"
+MAX_YIDUN_VALUES = 1024
+MAX_YIDUN_STRING = 256
+MAX_YIDUN_DEPTH = 3
 
 _HEADER = struct.Struct("<4sHHBB12sI")
 assert _HEADER.size == 26
@@ -63,6 +67,47 @@ def _validate(rules: dict[str, Any]) -> None:
             raise ValueError(f"rule strings must contain 1..{MAX_STRINGS} items")
         if not all(isinstance(value, str) and value for value in strings):
             raise ValueError("rule strings must be non-empty strings")
+    yidun = rules.get("yidun")
+    if yidun is not None:
+        _validate_yidun(yidun)
+
+
+def _validate_yidun(yidun: Any) -> None:
+    if not isinstance(yidun, dict):
+        raise ValueError("yidun must be an object")
+    if yidun.get("schema") != YIDUN_SCHEMA:
+        raise ValueError("unsupported yidun signature schema")
+    source = yidun.get("source")
+    if not isinstance(source, dict):
+        raise ValueError("yidun source required")
+    for key in ("vendor", "library", "sample_sha256", "evidence"):
+        value = source.get(key)
+        if not isinstance(value, str) or not value or len(value) > MAX_YIDUN_STRING:
+            raise ValueError(f"yidun source.{key} required")
+    digest = source["sample_sha256"].lower()
+    if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+        raise ValueError("yidun source.sample_sha256 must be 64 hex chars")
+    _validate_yidun_node(yidun, 0)
+
+
+def _validate_yidun_node(node: Any, depth: int) -> None:
+    if depth > MAX_YIDUN_DEPTH:
+        raise ValueError("yidun nesting too deep")
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "source":
+                continue
+            _validate_yidun_node(value, depth + 1)
+    elif isinstance(node, list):
+        if len(node) > MAX_YIDUN_VALUES:
+            raise ValueError("yidun list too large")
+        for value in node:
+            _validate_yidun_node(value, depth + 1)
+    elif isinstance(node, str):
+        if not node or len(node) > MAX_YIDUN_STRING:
+            raise ValueError("yidun strings must be 1..256 chars")
+    else:
+        raise ValueError("yidun leaves must be strings")
 
 
 def pack_rules(

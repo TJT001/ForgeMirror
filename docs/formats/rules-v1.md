@@ -2,9 +2,9 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | 0.2（P3 原型） |
-| 日期 | 2026-11-13 |
-| 状态 | 原型已实现；YARA 引擎与热更新待 P3 后续冻结 |
+| 版本 | 0.3（P3 原型） |
+| 日期 | 2026-11-21 |
+| 状态 | 原型已实现；Yidun 特征随 PKR1 下发，YARA 引擎与热更新后续冻结 |
 | 关联 | 设计文档 §4.S4、§7.3、§17.6；实施步骤 P3 |
 
 ## 1. 二进制布局
@@ -41,13 +41,26 @@
 ```json
 {
   "schema": "forgemirror.rules/1",
-  "version": 1,
+  "version": 2,
   "min_shell_version": "0.1.0",
   "yara": "rule demo { strings: $a = \"alpha\" condition: $a }",
   "rules": [
     {"id": "demo_all", "logic": "all", "strings": ["alpha", "beta"]},
     {"id": "demo_any", "logic": "any", "strings": ["gamma", "delta"]}
-  ]
+  ],
+  "yidun": {
+    "schema": "forgemirror.yidun-signatures/1",
+    "source": {
+      "vendor": "NetEase Yidun",
+      "library": "libnesec.so",
+      "sample_sha256": "8ff576e1…05ff",
+      "evidence": "docs/research/libnesec_易盾加固还原.md"
+    },
+    "root": {"su_paths": ["/system/bin/su"]},
+    "hook": {"maps_markers": ["frida-agent-"]},
+    "emulator": {"cloud_services": ["VMOS_MANAGER_SERVICE"]},
+    "dex": {"standard_magic": ["dex\n035\u0000"], "dex2oat_markers": ["dex2oat"]}
+  }
 }
 ```
 
@@ -56,6 +69,7 @@
 - `rules` 1..256 条；每条 1..32 个非空字符串；
 - `logic` 仅支持 `all` / `any`；
 - `yara` 可选，UTF-8 源码，上限 64 KiB；编译失败时不加载规则包；
+- `yidun` 可选；存在时必须带 `schema=forgemirror.yidun-signatures/1` 和完整的 `source`（vendor/library/sample_sha256/evidence），字符串叶子 1..256 字符、每层列表 ≤1024、嵌套 ≤3；校验失败整包拒绝；
 - 解析失败、签名失败或版本不满足时整包拒绝，不部分加载；
 - 研究侧九条规则只作研究证据；产品规则独立编写并记录特征来源与许可。
 
@@ -63,12 +77,14 @@
 
 - 壳在 bootstrap 后异步扫描 APK 内 `lib/**/*.so`（上限 64 MB）；
 - `yara` 存在时使用壳内 YARA 4.5.4（JNI）扫描，否则按 all/any 字符串匹配；
+- `yidun` 存在时优先作为易盾探针特征源，覆盖内置 `assets/yidun-signatures.json`；`ShieldDetect` 日志的 `source=pkr1|asset` 标明实际来源；
+- 远端包经验签、解密、`yidun` 段校验和版本门控后原子落盘，下次进程启动生效；非法 `yidun` 段导致整包拒绝，不部分加载；
 - 命中写入加密事件队列并批量上报；远端进程不重复上报；
 - 扫描不阻塞首帧；规则包纳入清单签名产物，S8 闸门验证签名和密钥绑定。
 
 ## 5. 待后续
 
 - 研究侧九条规则的真实语义与产品规则正反例；
-- 规则热更新、版本门控与原子替换；
 - 内存扫描与 `/proc/self/maps` 候选管理；
-- 规则版本与清单 `rule_version` 的一致性。
+- 规则版本与清单 `rule_version` 的一致性；
+- Yidun 特征更新的回滚与灰度策略。

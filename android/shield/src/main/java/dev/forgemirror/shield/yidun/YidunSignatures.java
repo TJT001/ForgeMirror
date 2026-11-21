@@ -93,18 +93,38 @@ public final class YidunSignatures {
     }
 
     public static YidunSignatures parse(String json) throws Exception {
-        JSONObject root = new JSONObject(json);
+        return parse(new JSONObject(json));
+    }
+
+    public static YidunSignatures parse(JSONObject root) throws Exception {
+        if (root == null) {
+            throw new SecurityException("empty yidun signatures");
+        }
+        if (!"forgemirror.yidun-signatures/1".equals(root.optString("schema", ""))) {
+            throw new SecurityException("unsupported yidun signature schema");
+        }
         JSONObject source = root.optJSONObject("source");
+        if (source == null) {
+            throw new SecurityException("yidun source required");
+        }
+        String vendor = optString(source, "vendor");
+        String library = optString(source, "library");
+        String sampleSha256 = optString(source, "sample_sha256");
+        String evidence = optString(source, "evidence");
+        if (vendor.isEmpty() || library.isEmpty() || evidence.isEmpty()
+                || sampleSha256.length() != 64 || !isHex(sampleSha256)) {
+            throw new SecurityException("yidun source metadata required");
+        }
         JSONObject rootChecks = root.optJSONObject("root");
         JSONObject debug = root.optJSONObject("debug");
         JSONObject hook = root.optJSONObject("hook");
         JSONObject emulator = root.optJSONObject("emulator");
         JSONObject dex = root.optJSONObject("dex");
         return new YidunSignatures(
-                optString(source, "vendor"),
-                optString(source, "library"),
-                optString(source, "sample_sha256"),
-                optString(source, "evidence"),
+                vendor,
+                library,
+                sampleSha256,
+                evidence,
                 strings(rootChecks, "su_paths"),
                 strings(rootChecks, "mount_markers"),
                 strings(debug, "task_status_keys"),
@@ -122,6 +142,17 @@ public final class YidunSignatures {
                 strings(emulator, "cloud_services"),
                 strings(dex, "standard_magic"),
                 strings(dex, "dex2oat_markers"));
+    }
+
+    private static boolean isHex(String value) {
+        for (int index = 0; index < value.length(); index++) {
+            char character = Character.toLowerCase(value.charAt(index));
+            if (!((character >= '0' && character <= '9')
+                    || (character >= 'a' && character <= 'f'))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public static YidunSignatures empty() {
