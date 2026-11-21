@@ -18,15 +18,17 @@ def _jdk_available():
 class AiDecoyTests(unittest.TestCase):
     def test_jar_contains_each_lexicon_class(self):
         lexicon = ai_decoy.load_lexicon()
+        expected = sum(len(group["classes"]) for group in lexicon["groups"])
         with tempfile.TemporaryDirectory() as temporary:
             jar = Path(temporary) / "decoy.jar"
             count = ai_decoy.build_decoy_jar(None, jar)
-            self.assertEqual(count, len(lexicon["classes"]))
+            self.assertEqual(count, expected)
             with zipfile.ZipFile(jar) as archive:
                 names = set(archive.namelist())
-        package = lexicon["package"].replace(".", "/")
-        for name in lexicon["classes"]:
-            self.assertIn(f"{package}/{name}.class", names)
+        for group in lexicon["groups"]:
+            package = group["package"].replace(".", "/")
+            for name in group["classes"]:
+                self.assertIn(f"{package}/{name}.class", names)
 
     def test_merge_keeps_base_entries(self):
         with tempfile.TemporaryDirectory() as temporary:

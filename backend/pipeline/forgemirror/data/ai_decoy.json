@@ -1,46 +1,138 @@
 {
   "schema": "forgemirror.ai-decoy/1",
-  "package": "com.dexguard.decoy.symbols",
-  "classes": [
-    "Ransomware",
-    "Keylogger",
-    "Botnet",
-    "Rootkit",
-    "ExploitKit",
-    "Backdoor",
-    "Dropper",
-    "Crypter",
-    "Injector",
-    "Stealer",
-    "Wiper",
-    "Miner",
-    "Implant",
-    "Beacon",
-    "Shellcode",
-    "Payload",
-    "C2Channel",
-    "Exfiltrator",
-    "Persistence",
-    "PrivilegeEscalation",
-    "CredentialHarvester",
-    "LateralMovement",
-    "PayloadStager",
-    "CommandControl"
-  ],
-  "fields": [
-    "payloadStage",
-    "beaconProfile",
-    "exfilQueue",
-    "persistencePath",
-    "c2Endpoint",
-    "injectionTarget",
-    "credentialStore",
-    "stagerChannel"
-  ],
-  "strings": [
-    "stage-two",
-    "beacon-profile",
-    "credential-cache",
-    "persistence-hook"
+  "groups": [
+    {
+      "package": "com.dexguard.decoy.symbols",
+      "classes": [
+        "Ransomware",
+        "Keylogger",
+        "Botnet",
+        "Rootkit",
+        "ExploitKit",
+        "Backdoor",
+        "Dropper",
+        "Crypter",
+        "Injector",
+        "Stealer",
+        "Wiper",
+        "Miner",
+        "Implant",
+        "Beacon",
+        "Shellcode",
+        "Payload",
+        "C2Channel",
+        "Exfiltrator",
+        "Persistence",
+        "PrivilegeEscalation",
+        "CredentialHarvester",
+        "LateralMovement",
+        "PayloadStager",
+        "CommandControl"
+      ],
+      "fields": [
+        "payloadStage",
+        "beaconProfile",
+        "exfilQueue",
+        "persistencePath",
+        "c2Endpoint",
+        "injectionTarget",
+        "credentialStore",
+        "stagerChannel"
+      ],
+      "strings": [
+        "stage-two",
+        "beacon-profile",
+        "credential-cache",
+        "persistence-hook"
+      ]
+    },
+    {
+      "package": "com.dexguard.decoy.life",
+      "classes": [
+        "Genome",
+        "Transcriptome",
+        "Proteomics",
+        "Metabolomics",
+        "CellCulture",
+        "Microscopy",
+        "Sequencing",
+        "Phylogenetics",
+        "EnzymeAssay",
+        "Bioreactor",
+        "Fermentation",
+        "CryoStorage"
+      ],
+      "fields": [
+        "sampleId",
+        "assayRun",
+        "cultureBatch",
+        "readDepth",
+        "proteinFraction",
+        "metabolitePeak"
+      ],
+      "strings": [
+        "sample-batch",
+        "assay-run",
+        "culture-log"
+      ]
+    },
+    {
+      "package": "com.dexguard.decoy.materials",
+      "classes": [
+        "Spectroscopy",
+        "Chromatography",
+        "Titration",
+        "Catalyst",
+        "Polymer",
+        "Solvent",
+        "Reagent",
+        "Isotope",
+        "Electrolysis",
+        "Calorimetry",
+        "Semiconductor",
+        "Superconductor",
+        "Photovoltaics",
+        "Alloy",
+        "Ceramic",
+        "Composite"
+      ],
+      "fields": [
+        "sampleMass",
+        "solventRatio",
+        "reactionTime",
+        "phaseShift",
+        "latticeIndex"
+      ],
+      "strings": [
+        "phase-a",
+        "batch-7",
+        "spectrum-scan"
+      ]
+    },
+    {
+      "package": "com.dexguard.decoy.office",
+      "classes": [
+        "ContractClause",
+        "ComplianceAudit",
+        "LedgerEntry",
+        "RiskModel",
+        "Portfolio",
+        "Settlement",
+        "Invoice",
+        "Reconciliation"
+      ],
+      "fields": [
+        "clauseId",
+        "ledgerBatch",
+        "auditRun",
+        "riskScore",
+        "settlementDate"
+      ],
+      "strings": [
+        "clause-a",
+        "ledger-batch",
+        "audit-log"
+      ]
+    }
   ]
 }

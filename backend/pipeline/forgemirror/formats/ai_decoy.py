@@ -20,18 +20,15 @@ _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _PACKAGE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
 
 
-def load_lexicon(path: Path | None = None) -> dict:
-    data = json.loads(Path(path or DEFAULT_LEXICON).read_text(encoding="utf-8"))
-    if data.get("schema") != "forgemirror.ai-decoy/1":
-        raise ValueError("unsupported AI decoy lexicon")
-    package = data.get("package", "")
+def _normalize_group(group: dict) -> dict:
+    package = group.get("package", "")
     if not _PACKAGE.fullmatch(package):
         raise ValueError("AI decoy package is not a Java package name")
-    classes = data.get("classes") or []
-    fields = data.get("fields") or []
-    strings = data.get("strings") or []
+    classes = group.get("classes") or []
+    fields = group.get("fields") or []
+    strings = group.get("strings") or []
     if not classes or not fields:
-        raise ValueError("AI decoy lexicon needs classes and fields")
+        raise ValueError("AI decoy group needs classes and fields")
     if len(set(classes)) != len(classes) or len(set(fields)) != len(fields):
         raise ValueError("AI decoy names must be unique")
     for name in [*classes, *fields]:
@@ -41,6 +38,26 @@ def load_lexicon(path: Path | None = None) -> dict:
         raise ValueError("AI decoy strings must be text")
     return {"package": package, "classes": classes,
             "fields": fields, "strings": strings}
+
+
+def load_lexicon(path: Path | None = None) -> dict:
+    data = json.loads(Path(path or DEFAULT_LEXICON).read_text(encoding="utf-8"))
+    if data.get("schema") != "forgemirror.ai-decoy/1":
+        raise ValueError("unsupported AI decoy lexicon")
+    raw_groups = data.get("groups")
+    if raw_groups is None:
+        raw_groups = [data]
+    groups = [_normalize_group(group) for group in raw_groups]
+    if not groups:
+        raise ValueError("AI decoy lexicon is empty")
+    seen: set[str] = set()
+    for group in groups:
+        for name in group["classes"]:
+            qualified = f'{group["package"]}.{name}'
+            if qualified in seen:
+                raise ValueError(f"duplicate AI decoy class: {qualified}")
+            seen.add(qualified)
+    return {"groups": groups}
 
 
 def _source(package: str, class_name: str, fields: list[str],
@@ -76,32 +93,34 @@ def _jar_directory(directory: Path, target: Path) -> None:
 
 def build_decoy_jar(lexicon_path: Path | None, target: Path) -> int:
     lexicon = load_lexicon(lexicon_path)
-    package = lexicon["package"]
-    fields = lexicon["fields"]
-    strings = lexicon["strings"]
     with tempfile.TemporaryDirectory(prefix="fm-decoy-") as temporary:
         root = Path(temporary)
         source_dir = root / "src"
         classes_dir = root / "classes"
-        package_dir = source_dir / package.replace(".", "/")
-        package_dir.mkdir(parents=True)
         sources = []
-        for class_name in lexicon["classes"]:
-            path = package_dir / f"{class_name}.java"
-            path.write_text(_source(package, class_name, fields, strings),
-                            encoding="utf-8")
-            sources.append(str(path))
+        total = 0
+        for group in lexicon["groups"]:
+            package = group["package"]
+            package_dir = source_dir / package.replace(".", "/")
+            package_dir.mkdir(parents=True, exist_ok=True)
+            for class_name in group["classes"]:
+                path = package_dir / f"{class_name}.java"
+                path.write_text(
+                    _source(package, class_name, group["fields"],
+                            group["strings"]),
+                    encoding="utf-8")
+                sources.append(str(path))
+                total += 1
         classes_dir.mkdir(parents=True)
         process = subprocess.run(
             [java_tool("javac"), "--release", "11", "-encoding", "UTF-8",
-             "-d", str(classes_dir),
-             *sources],
+             "-d", str(classes_dir), *sources],
             capture_output=True, text=True,
         )
         if process.returncode != 0:
             raise RuntimeError(process.stderr[-1000:] or "javac failed")
         _jar_directory(classes_dir, target)
-    return len(lexicon["classes"])
+    return total
 
 
 def merge_jar(base: Path, extra: Path, target: Path) -> None:

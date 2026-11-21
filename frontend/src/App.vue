@@ -543,7 +543,7 @@ async function cancel() {
                 <span class="toggle-box"></span>
                 <span class="toggle-copy">
                   <strong>语义诱饵</strong>
-                  <small>注入未使用的安全域 decoy 类名，增加分析噪音</small>
+                  <small>注入未使用的跨学科 decoy 类名，增加分析噪音</small>
                 </span>
               </label>
             </div>
