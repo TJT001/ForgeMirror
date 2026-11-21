@@ -24,13 +24,43 @@
 
 Web 界面与 CLI 均提供对应开关。
 
-1. **Core 自解密**：`libshield_core.so` 构建期 AES-GCM 加密并从 APK 移除；运行时按 ABI 解密到 memfd，由自研 ELF loader 内存加载。
-2. **双 PT_DYNAMIC 诱饵**：保留伪动态表与真实表并存，可与 section 名表破坏叠加，增加静态还原歧义。
-3. **破坏 section 名表**：构建期改写 ELF section 名称，保留动态链接所需结构，不影响运行。
-4. **Text 段自解密**：boot / hook / yara 的 `.text` 构建期 LZSS 压缩加密，`DT_INIT` 运行时自解密并恢复执行权限。
-5. **运行时检测**：环境、Root、注入、Hook 框架与 YARA 规则扫描；PKR1 规则包远程更新、签名校验、版本门控与事件上报；响应模式 `log` / `toast` / `degrade` / `block`。
-6. **内置内容密钥**：32 字节内容密钥随包分发，派生容器、策略、规则、core 与文件层密钥；关闭后改走授权服务在线取钥。
-7. **白盒密钥库**：Chow 白盒 AES 表包裹内容密钥（`WBK1`），native 解包 + HKDF + FDX2 解密；根密钥不回到 Java，Java 只拿派生密钥。
+1. **Core 自解密**
+   - 构建期把 `libshield_core.so` 用 HKDF(`FM/core/v1`) + AES-GCM 封装为 `assets/shield/core/<abi>.enc`，并从 APK 移除明文 core
+   - 运行时按 ABI 选取加密 core，解密后写入 memfd
+   - `android_dlopen_ext` + 自研 ELF loader 直接从 fd 映射，不落盘
+   - 映射完成后关闭 fd；core 缺失时回退平台库并记录降级
+2. **双 PT_DYNAMIC 诱饵**
+   - 追加精简伪动态表，仅保留 `DT_NEEDED`、`DT_SONAME`、`DT_STRTAB`、`DT_STRSZ`、`DT_NULL`
+   - `PT_DYNAMIC` 与 `SHT_DYNAMIC` 同步指向伪表，原始动态表字节保留，形成真伪双表
+   - 可叠加 section 名表破坏；按伪表还原会丢失符号与重定位信息
+   - core 库不做该变换，保证自解密链路完整
+3. **破坏 section 名表**
+   - 构建期覆写 ELF `shstrtab`，section 名不可读
+   - 保留 program header、`.dynamic`、`.dynsym` / `.dynstr` 与重定位结构
+   - 与双 PT_DYNAMIC 同开关生效，覆盖 boot / hook / yara 等壳库
+   - 16 KB 页对齐与签名流程不变
+4. **Text 段自解密**
+   - 对 boot / hook / yara 的 `.text` 做 LZSS 压缩 + 32 字节密钥异或
+   - 压缩密文追加到文件尾部，并重建 section header
+   - `DT_INIT`（`fm_selfdecrypt_init`）在加载前解密并 `mprotect` 恢复执行权限
+   - 逐库记录压缩前后大小；不支持的 ELF 自动跳过并告警
+5. **运行时检测**
+   - 通用 `env_*` 规则 + 易盾来源的 `yidun_*` 签名
+   - native YARA 扫描 DEX / ELF / 字符串 / 哈希，命中写入事件队列
+   - PKR1 签名规则包，支持远程下发、版本门控与篡改拒绝
+   - 响应模式 `log` / `toast` / `degrade` / `block`
+   - 事件由主进程统一上报 API
+6. **内置内容密钥**
+   - 32 字节 `K_content` 随包分发；也可复用已有 key file 保证可复现构建
+   - native vault 安装后按标签派生 policy / file / native / rules / core 密钥
+   - 关闭“内置内容密钥”后改为授权服务在线取钥，根密钥只安装一次
+   - 密钥资产纳入签名清单与产物校验
+7. **白盒密钥库**
+   - 构建期生成 `WBK1` 包裹块（nonce + Chow 白盒 CTR keystream）
+   - 保护时导出 `WBX1` 扁平表（约 1.2 MB），Java 白盒实现只留在构建工具
+   - native C 实现白盒查表、HKDF、FDX2 AES-GCM 解密与逐文件 SHA-256 校验
+   - 根密钥不回到 Java；Java 只持有派生密钥，用完清零
+   - 表格式、长度与魔数严格校验，解包失败直接 fail-closed
 
 ## 技术选型
 
