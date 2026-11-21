@@ -46,6 +46,8 @@ def main() -> int:
         [FileSpec(name, data) for name, data in FILES],
         k_content=KEY,
         build_id=BUILD_ID,
+        nonce_prefix=bytes(range(8)),
+        toc_nonce=bytes(range(12, 24)),
     ))
     (OUT / "key.wb").write_bytes(whitebox.wrap(table, KEY, NONCE))
     (OUT / "wbaes.flat").write_bytes(whitebox.export_table(table))
