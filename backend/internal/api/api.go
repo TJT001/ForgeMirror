@@ -163,6 +163,7 @@ func (s *Server) createTask(c *gin.Context) {
 		"corrupt_section_names": true,
 		"self_decrypt_text":     true,
 		"detection":             true,
+		"whitebox":              true,
 	} {
 		value, err := boolOption(name, fallback)
 		if err != nil {
