@@ -1,0 +1,926 @@
+{
+ "su_paths": [
+  {
+   "off": "0x10929",
+   "s": "/su/bin/su"
+  },
+  {
+   "off": "0x10a99",
+   "s": "/system_ext/bin/su"
+  },
+  {
+   "off": "0x10c94",
+   "s": "/bin/su"
+  },
+  {
+   "off": "0x10ea1",
+   "s": "/system/xbin/bstk/su"
+  },
+  {
+   "off": "0x10eb6",
+   "s": "/vendor/xbin/su"
+  },
+  {
+   "off": "0x11022",
+   "s": "/data/local/bin/su"
+  },
+  {
+   "off": "0x11035",
+   "s": "/system/bin/.ext/.su"
+  },
+  {
+   "off": "0x111bc",
+   "s": "/odm/bin/su"
+  },
+  {
+   "off": "0x1180b",
+   "s": "/system/bin/.ext/su"
+  },
+  {
+   "off": "0x11cef",
+   "s": "/system/xbin/sugote-mksh"
+  },
+  {
+   "off": "0x11d08",
+   "s": "/vendor/bin/su"
+  },
+  {
+   "off": "0x11e96",
+   "s": "/sbin/su"
+  },
+  {
+   "off": "0x12453",
+   "s": "/system/bin/su"
+  },
+  {
+   "off": "0x12462",
+   "s": "/dev/su"
+  },
+  {
+   "off": "0x12b5a",
+   "s": "/xbin/su"
+  },
+  {
+   "off": "0x12d04",
+   "s": "/data/local/su"
+  },
+  {
+   "off": "0x12e4e",
+   "s": "/data/local/xbin/su"
+  },
+  {
+   "off": "0x12e62",
+   "s": "/system/xbin/sugote"
+  },
+  {
+   "off": "0x12e76",
+   "s": "/cache/su"
+  },
+  {
+   "off": "0x13029",
+   "s": "/system/bin/failsafe/su"
+  },
+  {
+   "off": "0x1335e",
+   "s": "/system/xbin/su"
+  },
+  {
+   "off": "0x1336e",
+   "s": "/product/bin/su"
+  },
+  {
+   "off": "0x1337e",
+   "s": "/apex/com.android.art/bin/su"
+  },
+  {
+   "off": "0x1339b",
+   "s": "/system/usr/we-need-root/su"
+  },
+  {
+   "off": "0x133b7",
+   "s": "/data/su"
+  },
+  {
+   "off": "0x13594",
+   "s": "/system/xbin/supolicy"
+  },
+  {
+   "off": "0x1373a",
+   "s": "/system/sd/xbin/su"
+  },
+  {
+   "off": "0x13a24",
+   "s": "/apex/com.android.runtime/bin/su"
+  }
+ ],
+ "emulator": [
+  {
+   "off": "0x106b9",
+   "s": "/data/data/com.androVM.vmconfig"
+  },
+  {
+   "off": "0x106d9",
+   "s": "/data/data/com.microvirt.market"
+  },
+  {
+   "off": "0x10720",
+   "s": "/sys/class/bdi/vboxsf-c"
+  },
+  {
+   "off": "0x10738",
+   "s": "/system/etc/init.androVM.sh"
+  },
+  {
+   "off": "0x107cf",
+   "s": "/data/data/com.netease.mumu.cloner"
+  },
+  {
+   "off": "0x107f2",
+   "s": "/sys/module/vboxvideo"
+  },
+  {
+   "off": "0x10944",
+   "s": "Genymotion"
+  },
+  {
+   "off": "0x1094f",
+   "s": "androVM.gles"
+  },
+  {
+   "off": "0x1095c",
+   "s": "/sys/module/vboxguest"
+  },
+  {
+   "off": "0x10972",
+   "s": "microvirt.mut"
+  },
+  {
+   "off": "0x10b0e",
+   "s": "/init.vbox2345_x86.rc"
+  },
+  {
+   "off": "0x10ce0",
+   "s": "/data/misc/profiles/ref/com.bignox.app.store.hd"
+  },
+  {
+   "off": "0x10d10",
+   "s": "/data/data/com.microvirt.tools"
+  },
+  {
+   "off": "0x10ecf",
+   "s": "/sys/class/misc/vboxuser"
+  },
+  {
+   "off": "0x10ee8",
+   "s": "/sys/devices/virtual/misc/vboxuser"
+  },
+  {
+   "off": "0x11081",
+   "s": "/system/bin/nox-prop"
+  },
+  {
+   "off": "0x11200",
+   "s": "/data/data/com.bluestacks.appmart"
+  },
+  {
+   "off": "0x1127c",
+   "s": "VMOS_MANAGER_SERVICE"
+  },
+  {
+   "off": "0x1142f",
+   "s": "/data/data/com.bluestacks.appfinder"
+  },
+  {
+   "off": "0x1148c",
+   "s": "microvirt.simserial"
+  },
+  {
+   "off": "0x11604",
+   "s": "ro.genymotion.version"
+  },
+  {
+   "off": "0x11647",
+   "s": "/system/bin/ldinit"
+  },
+  {
+   "off": "0x1165a",
+   "s": "/system/lib/libdroid4x.so"
+  },
+  {
+   "off": "0x11859",
+   "s": "/system/bin/microvirt-prop"
+  },
+  {
+   "off": "0x11874",
+   "s": "/sys/devices/virtual/bdi/vboxsf-c"
+  },
+  {
+   "off": "0x11896",
+   "s": "/system/bin/androVM-vbox-sf"
+  },
+  {
+   "off": "0x11a4b",
+   "s": "EMULATOR"
+  },
+  {
+   "off": "0x11a54",
+   "s": "qemu.sf.fake_camera"
+  },
+  {
+   "off": "0x11a68",
+   "s": "/system/bin/windroyed"
+  },
+  {
+   "off": "0x11b5b",
+   "s": "androVM"
+  },
+  {
+   "off": "0x11d2c",
+   "s": "com.androVM.vmconfig"
+  },
+  {
+   "off": "0x11d41",
+   "s": "/sys/module/vboxsf"
+  },
+  {
+   "off": "0x11ef9",
+   "s": "/data/property/persist.nox.simulator_version"
+  },
+  {
+   "off": "0x11f26",
+   "s": "/system/bin/XCPlayer-prop"
+  },
+  {
+   "off": "0x11f40",
+   "s": "/system/bin/androVM_setprop"
+  },
+  {
+   "off": "0x12069",
+   "s": "vbox86"
+  },
+  {
+   "off": "0x1208c",
+   "s": "/sys/devices/virtual/misc/goldfish_pipe"
+  },
+  {
+   "off": "0x120b4",
+   "s": "microvirt.memu_version"
+  },
+  {
+   "off": "0x12245",
+   "s": "/data/bluestacks.prop"
+  },
+  {
+   "off": "0x122ba",
+   "s": "/system/lib/vboxvideo.ko"
+  },
+  {
+   "off": "0x1247d",
+   "s": "com.bluestacks.gamepophome"
+  },
+  {
+   "off": "0x12498",
+   "s": "/system/bin/microvirtd"
+  },
+  {
+   "off": "0x125d9",
+   "s": "com.bluestacks.BstCommandProcessor"
+  },
+  {
+   "off": "0x12613",
+   "s": "/dev/vboxuser"
+  },
+  {
+   "off": "0x12621",
+   "s": "/system/bin/get_androVM_host"
+  },
+  {
+   "off": "0x1263e",
+   "s": "microvirt.imsi"
+  },
+  {
+   "off": "0x12a15",
+   "s": "vbox86p"
+  },
+  {
+   "off": "0x12a1d",
+   "s": "com.bluestacks.home"
+  },
+  {
+   "off": "0x12a31",
+   "s": "/system/bin/ldmountsf"
+  },
+  {
+   "off": "0x12b71",
+   "s": "ro.kernel.qemu"
+  },
+  {
+   "off": "0x12b80",
+   "s": "/data/data/com.mumu.store"
+  },
+  {
+   "off": "0x12bab",
+   "s": "/sys/devices/virtual/misc/vboxguest"
+  },
+  {
+   "off": "0x12bcf",
+   "s": "/dev/goldfish_pipe"
+  },
+  {
+   "off": "0x12d40",
+   "s": "com.bluestacks.bstfolder"
+  },
+  {
+   "off": "0x12eb4",
+   "s": "/system/bin/bstshutdown"
+  },
+  {
+   "off": "0x12efb",
+   "s": "init.svc.ttVM_x86-setup"
+  },
+  {
+   "off": "0x13053",
+   "s": "/data/data/com.bluestacks.accelerometerui"
+  },
+  {
+   "off": "0x1307d",
+   "s": "/data/data/com.bluestacks.home"
+  },
+  {
+   "off": "0x1309c",
+   "s": "/system/bin/mount.vboxsf"
+  },
+  {
+   "off": "0x130b5",
+   "s": "/sys/module/goldfish_battery"
+  },
+  {
+   "off": "0x13238",
+   "s": "/system/bin/xiaopiVM-prop"
+  },
+  {
+   "off": "0x13252",
+   "s": "/dev/vboxguest"
+  },
+  {
+   "off": "0x13261",
+   "s": "/sys/bus/pci/drivers/vboxguest"
+  },
+  {
+   "off": "0x133d9",
+   "s": "com.bluestacks.s2p"
+  },
+  {
+   "off": "0x133f7",
+   "s": "/data/misc/profiles/ref/com.bignox.google.installer"
+  },
+  {
+   "off": "0x1342b",
+   "s": "/system/xbin/mount.vboxsf"
+  },
+  {
+   "off": "0x13445",
+   "s": "/sys/module/goldfish_audio"
+  },
+  {
+   "off": "0x13460",
+   "s": "init.svc.droid4x"
+  },
+  {
+   "off": "0x13471",
+   "s": "init.svc.ldinit"
+  },
+  {
+   "off": "0x13619",
+   "s": "/system/bin/droid4x-prop"
+  },
+  {
+   "off": "0x13632",
+   "s": "/system/etc/mumu-configs/device-prop-configs/mumu.config"
+  },
+  {
+   "off": "0x13793",
+   "s": "init.svc.microvirtd"
+  },
+  {
+   "off": "0x138c5",
+   "s": "init.svc.vbox86-setup"
+  },
+  {
+   "off": "0x138db",
+   "s": "/data/data/com.mumu.launcher"
+  },
+  {
+   "off": "0x138f8",
+   "s": "/system/app/bluestacksHome.apk"
+  },
+  {
+   "off": "0x13917",
+   "s": "/sys/module/vboxvideo/notes/.note.gnu.build-id"
+  },
+  {
+   "off": "0x13946",
+   "s": "/system/lib/vboxguest.ko"
+  },
+  {
+   "off": "0x13a61",
+   "s": "/system/bin/ttVM-prop"
+  },
+  {
+   "off": "0x13a77",
+   "s": "/data/.bluestacks.prop"
+  },
+  {
+   "off": "0x13ab1",
+   "s": "/sys/class/misc/vboxguest"
+  },
+  {
+   "off": "0x13acb",
+   "s": "/system/lib/vboxsf.ko"
+  }
+ ],
+ "hook": [
+  {
+   "off": "0x11d82",
+   "s": "Friday"
+  },
+  {
+   "off": "0xeeed9",
+   "s": "XposedBridge"
+  },
+  {
+   "off": "0xeeef0",
+   "s": " libxposed_art.so"
+  },
+  {
+   "off": "0xeef21",
+   "s": "libsubstrate"
+  },
+  {
+   "off": "0xeef39",
+   "s": "frida-agent-"
+  },
+  {
+   "off": "0xeef51",
+   "s": "libriru_"
+  },
+  {
+   "off": "0xeefb0",
+   "s": "*code_cache/inject.dex"
+  }
+ ],
+ "debug": [
+  {
+   "off": "0x105380",
+   "s": "/proc/self/maps"
+  },
+  {
+   "off": "0x107ba",
+   "s": "/proc/self/fd/%s"
+  },
+  {
+   "off": "0x109380",
+   "s": "/proc/self/maps"
+  },
+  {
+   "off": "0x10980",
+   "s": "/proc/self/status"
+  },
+  {
+   "off": "0x10c47",
+   "s": "/proc/%d/mem"
+  },
+  {
+   "off": "0x10c66f",
+   "s": "ptrace"
+  },
+  {
+   "off": "0x10e97",
+   "s": "TracerPid"
+  },
+  {
+   "off": "0x115d0",
+   "s": "TracerPid:"
+  },
+  {
+   "off": "0x117dd",
+   "s": "/proc/%d/task/%d/mem"
+  },
+  {
+   "off": "0x117f2",
+   "s": "/proc/self/fd"
+  },
+  {
+   "off": "0x11b12",
+   "s": "TracerPid:"
+  },
+  {
+   "off": "0x121c9",
+   "s": "/proc/%d/task/%d/status"
+  },
+  {
+   "off": "0x129e4",
+   "s": "/proc/self/maps"
+  },
+  {
+   "off": "0x12e0c",
+   "s": "/proc/%d/task"
+  },
+  {
+   "off": "0x131d8",
+   "s": "/proc/self/task"
+  },
+  {
+   "off": "0x13603",
+   "s": "/proc/%d/task/%d/comm"
+  },
+  {
+   "off": "0x13885",
+   "s": "/proc/%d/task/%s/status"
+  }
+ ],
+ "props": [
+  {
+   "off": "0x10972",
+   "s": "microvirt.mut"
+  },
+  {
+   "off": "0x10ccc",
+   "s": "ro.setupwizard.mode"
+  },
+  {
+   "off": "0x10d2f",
+   "s": "ro.build.remixos.version"
+  },
+  {
+   "off": "0x11054",
+   "s": "ro.build.flavor"
+  },
+  {
+   "off": "0x11222",
+   "s": "init.svc.xxkmsg"
+  },
+  {
+   "off": "0x11421",
+   "s": "ro.build.host"
+  },
+  {
+   "off": "0x1148c",
+   "s": "microvirt.simserial"
+  },
+  {
+   "off": "0x11604",
+   "s": "ro.genymotion.version"
+  },
+  {
+   "off": "0x11a54",
+   "s": "qemu.sf.fake_camera"
+  },
+  {
+   "off": "0x11a7e",
+   "s": "ro.andy.version"
+  },
+  {
+   "off": "0x11ebb",
+   "s": "ro.build.version.sdk"
+  },
+  {
+   "off": "0x120b4",
+   "s": "microvirt.memu_version"
+  },
+  {
+   "off": "0x12239",
+   "s": "ro.hardware"
+  },
+  {
+   "off": "0x124af",
+   "s": "ro.phoenix.version.codename"
+  },
+  {
+   "off": "0x124cb",
+   "s": "ro.phoenix.os.branch"
+  },
+  {
+   "off": "0x1263e",
+   "s": "microvirt.imsi"
+  },
+  {
+   "off": "0x1292e",
+   "s": "ro.product.manufacturer"
+  },
+  {
+   "off": "0x12b71",
+   "s": "ro.kernel.qemu"
+  },
+  {
+   "off": "0x12be2",
+   "s": "init.svc.su_kpbs_daemon"
+  },
+  {
+   "off": "0x12efb",
+   "s": "init.svc.ttVM_x86-setup"
+  },
+  {
+   "off": "0x13043",
+   "s": "ro.product.name"
+  },
+  {
+   "off": "0x13460",
+   "s": "init.svc.droid4x"
+  },
+  {
+   "off": "0x13471",
+   "s": "init.svc.ldinit"
+  },
+  {
+   "off": "0x1366b",
+   "s": "init.svc.pkVM_x86-setup"
+  },
+  {
+   "off": "0x13782",
+   "s": "ro.boot.hardware"
+  },
+  {
+   "off": "0x13793",
+   "s": "init.svc.microvirtd"
+  },
+  {
+   "off": "0x138c5",
+   "s": "init.svc.vbox86-setup"
+  },
+  {
+   "off": "0x1395f",
+   "s": "ro.phoenix.version.code"
+  },
+  {
+   "off": "0x13af2",
+   "s": "ro.phoenix.version.build"
+  },
+  {
+   "off": "0x13b0b",
+   "s": "init.svc.noxd"
+  }
+ ],
+ "packages": [
+  {
+   "off": "0x10639",
+   "s": "com.gionee."
+  },
+  {
+   "off": "0x10c3a",
+   "s": "com.samsung."
+  },
+  {
+   "off": "0x10e3e",
+   "s": "com.android."
+  },
+  {
+   "off": "0x10e86",
+   "s": "com.pp.assistant"
+  },
+  {
+   "off": "0x10fb2",
+   "s": "com.baidu."
+  },
+  {
+   "off": "0x10fbd",
+   "s": "com.amigo."
+  },
+  {
+   "off": "0x11155",
+   "s": "com.wandoujia."
+  },
+  {
+   "off": "0x11164",
+   "s": "com.tencent."
+  },
+  {
+   "off": "0x11171",
+   "s": "com.singulariti."
+  },
+  {
+   "off": "0x111e8",
+   "s": "com.android.flysilkworm"
+  },
+  {
+   "off": "0x113ba",
+   "s": "com.google."
+  },
+  {
+   "off": "0x1161a",
+   "s": "com.tiantian.ime"
+  },
+  {
+   "off": "0x1162b",
+   "s": "com.kaopu001.tiantianserver"
+  },
+  {
+   "off": "0x117d3",
+   "s": "com.qiku."
+  },
+  {
+   "off": "0x11c79",
+   "s": "com.sonymobile."
+  },
+  {
+   "off": "0x11d2c",
+   "s": "com.androVM.vmconfig"
+  },
+  {
+   "off": "0x12070",
+   "s": "com.kaopu.android.assistant"
+  },
+  {
+   "off": "0x1247d",
+   "s": "com.bluestacks.gamepophome"
+  },
+  {
+   "off": "0x125d9",
+   "s": "com.bluestacks.BstCommandProcessor"
+  },
+  {
+   "off": "0x12a1d",
+   "s": "com.bluestacks.home"
+  },
+  {
+   "off": "0x12b29",
+   "s": "com.sohu."
+  },
+  {
+   "off": "0x12d1a",
+   "s": "com.netease.nis.wrapper.MyApplication"
+  },
+  {
+   "off": "0x12d40",
+   "s": "com.bluestacks.bstfolder"
+  },
+  {
+   "off": "0x12df6",
+   "s": "com.miui."
+  },
+  {
+   "off": "0x12e00",
+   "s": "com.komoxo."
+  },
+  {
+   "off": "0x12e35",
+   "s": "com.netease.nis.wrapper."
+  },
+  {
+   "off": "0x13009",
+   "s": "com.qihoo"
+  },
+  {
+   "off": "0x131c6",
+   "s": "com.meizu."
+  },
+  {
+   "off": "0x13316",
+   "s": "com.iflytek."
+  },
+  {
+   "off": "0x13323",
+   "s": "com.yingyonghui.market"
+  },
+  {
+   "off": "0x133d9",
+   "s": "com.bluestacks.s2p"
+  },
+  {
+   "off": "0x1352d",
+   "s": "com.android"
+  }
+ ],
+ "proc": [
+  {
+   "off": "0x105380",
+   "s": "/proc/self/maps"
+  },
+  {
+   "off": "0x107ba",
+   "s": "/proc/self/fd/%s"
+  },
+  {
+   "off": "0x109380",
+   "s": "/proc/self/maps"
+  },
+  {
+   "off": "0x10980",
+   "s": "/proc/self/status"
+  },
+  {
+   "off": "0x10c47",
+   "s": "/proc/%d/mem"
+  },
+  {
+   "off": "0x116e6",
+   "s": "/proc/self/"
+  },
+  {
+   "off": "0x117dd",
+   "s": "/proc/%d/task/%d/mem"
+  },
+  {
+   "off": "0x117f2",
+   "s": "/proc/self/fd"
+  },
+  {
+   "off": "0x11a8e",
+   "s": "/proc/"
+  },
+  {
+   "off": "0x121c9",
+   "s": "/proc/%d/task/%d/status"
+  },
+  {
+   "off": "0x129e4",
+   "s": "/proc/self/maps"
+  },
+  {
+   "off": "0x12a04",
+   "s": "/proc/%s/cmdline"
+  },
+  {
+   "off": "0x12e0c",
+   "s": "/proc/%d/task"
+  },
+  {
+   "off": "0x131d8",
+   "s": "/proc/self/task"
+  },
+  {
+   "off": "0x133d3",
+   "s": "/proc"
+  },
+  {
+   "off": "0x13603",
+   "s": "/proc/%d/task/%d/comm"
+  },
+  {
+   "off": "0x13885",
+   "s": "/proc/%d/task/%s/status"
+  }
+ ],
+ "crypto": [
+  {
+   "off": "0x10bf4",
+   "s": "signatureValue"
+  },
+  {
+   "off": "0x10c03",
+   "s": "issuerUniqueID-[optional]"
+  },
+  {
+   "off": "0x10c54",
+   "s": "__dl__Z16create_namespacePKvPKcS2_S2_yS2_P19android_namespace_t"
+  },
+  {
+   "off": "0x10e18",
+   "s": "issuerAndSerialNumber"
+  },
+  {
+   "off": "0x1158c",
+   "s": "signatureAlgorithm"
+  },
+  {
+   "off": "0x1159f",
+   "s": "issuer"
+  },
+  {
+   "off": "0x11c50",
+   "s": "subject"
+  },
+  {
+   "off": "0x12150",
+   "s": "signature"
+  },
+  {
+   "off": "0x123f9",
+   "s": "subjectPublicKeyInfo"
+  },
+  {
+   "off": "0x1318e",
+   "s": "tbsCertificate"
+  },
+  {
+   "off": "0x132fe",
+   "s": "certificates-[optional]"
+  },
+  {
+   "off": "0x1384c",
+   "s": "subjectUniqueID-[optional]"
+  },
+  {
+   "off": "0x15451",
+   "s": "NSt6__ndk114__shared_countE"
+  },
+  {
+   "off": "0xee249",
+   "s": "/shared_prefs/"
+  },
+  {
+   "off": "0xee2c1",
+   "s": "/shared_prefs/"
+  }
+ ]
+}

@@ -5,6 +5,9 @@ import android.os.Build;
 import android.os.Debug;
 import android.util.Log;
 
+import dev.forgemirror.shield.yidun.YidunProbe;
+import dev.forgemirror.shield.yidun.YidunSignatures;
+
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -113,7 +116,32 @@ final class ShieldDetect {
         scanKnownPaths(findings, seen);
         scanFridaPorts(findings, seen);
         scanFridaProcesses(findings, seen);
+        scanYidun(context, findings, seen);
         return findings;
+    }
+
+    /**
+     * Yidun-derived probes live in the {@code yidun} package and emit
+     * {@code yidun_*} rule IDs so events keep their provenance. Evidence
+     * already reported by the generic probes is not reported twice.
+     */
+    private static void scanYidun(Context context, List<Finding> findings,
+                                  Set<String> seen) {
+        YidunSignatures signatures = YidunSignatures.load(context);
+        if (signatures.isEmpty()) {
+            return;
+        }
+        Set<String> evidenceSeen = new LinkedHashSet<>();
+        for (Finding finding : findings) {
+            evidenceSeen.add(finding.evidence);
+        }
+        for (YidunProbe.Finding finding : new YidunProbe(signatures).scan(context)) {
+            if (!evidenceSeen.add(finding.evidence)) {
+                continue;
+            }
+            add(findings, seen, finding.ruleId, finding.kind,
+                    finding.evidence, finding.confidence);
+        }
     }
 
     static String classifyMapsLine(String line) {

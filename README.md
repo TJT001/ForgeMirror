@@ -19,11 +19,13 @@ Vue 3 + TypeScript + Vite + Element Plus；Go + Gin + PostgreSQL/pgx；Python wo
 
 - [独立实现原则](docs/实现原则.md)
 - [设计文档](docs/设计文档.md)
-- [研究证据](docs/research/libDexHelper_架构还原.md)
+- [研究证据：参照样本 A（梆梆 libDexHelper）](docs/research/libDexHelper_架构还原.md)
+- [研究证据：参照样本 B（网易易盾 libnesec）](docs/research/libnesec_易盾加固还原.md)
+  - [检测链路实测](docs/research/libnesec_检测实测.md)、[证书链分析](docs/research/libnesec_证书链分析.md)、[VM 还原](docs/research/libnesec_VM还原.md)、[函数分类](docs/research/libnesec_函数分类.md)
 - [开发环境](docs/开发环境.md)
 - [依赖登记](docs/components.lock.json)
 
-研究文档中的旧相对路径以 /Users/taylee/SourceCode/pentest/zhiji 为准。原目录说明归档在 docs/初始目录说明归档.md，仅作历史资料。
+研究文档中的旧相对路径以 `/Users/taylee/SourceCode/pentest/zhiji` 和 `/Users/taylee/SourceCode/pentest/waimai` 为准。原目录说明归档在 docs/初始目录说明归档.md，仅作历史资料。
 
 ## 恢复 Codex 会话
 
