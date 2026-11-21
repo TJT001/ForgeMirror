@@ -128,7 +128,8 @@ final class ShieldDetect {
             Log.i(TAG, "no yidun signatures in pkr1; asset fallback");
         } else {
             Log.i(TAG, "yidun signatures injected from pkr1 vendor="
-                    + signatures.vendor + " sample=" + signatures.sampleSha256);
+                    + signatures.vendor + " captured=" + signatures.captured
+                    + " sample=" + signatures.sampleSha256);
         }
     }
 
@@ -149,6 +150,7 @@ final class ShieldDetect {
         }
         Log.i(TAG, "yidun signatures source=" + (fromRules ? "pkr1" : "asset")
                 + " vendor=" + signatures.vendor
+                + " captured=" + signatures.captured
                 + " sample=" + signatures.sampleSha256);
         Set<String> evidenceSeen = new LinkedHashSet<>();
         for (Finding finding : findings) {

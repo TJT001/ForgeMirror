@@ -86,13 +86,15 @@ public class YidunProbeDeviceTest {
                 + "\"source\":{\"vendor\":\"NetEase Yidun\","
                 + "\"library\":\"libnesec.so\","
                 + "\"sample_sha256\":\"8ff576e1cc403f0d6173bee361dabc362be6319f4b71ceb375834600a50005ff\","
-                + "\"evidence\":\"docs/research/libnesec_易盾加固还原.md\"},"
+                + "\"evidence\":\"docs/research/libnesec_易盾加固还原.md\","
+                + "\"captured\":\"device-test\"},"
                 + "\"root\":{\"su_paths\":[\"/system/bin/su\"]},"
                 + "\"emulator\":{\"cloud_services\":[\"VMOS_MANAGER_SERVICE\"]},"
                 + "\"dex\":{\"standard_magic\":[\"dex\\n035\\u0000\"],"
                 + "\"dex2oat_markers\":[\"dex2oat\"]}}";
         YidunSignatures parsed = YidunSignatures.parse(json);
         assertEquals("NetEase Yidun", parsed.vendor);
+        assertEquals("device-test", parsed.captured);
         assertTrue(parsed.suPaths.contains("/system/bin/su"));
         assertTrue(parsed.cloudServices.contains("VMOS_MANAGER_SERVICE"));
         assertTrue(parsed.dexStandardMagic.contains("dex\n035\0"));

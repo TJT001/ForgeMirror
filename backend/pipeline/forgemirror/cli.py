@@ -215,6 +215,10 @@ def protect_apk(
         help="Comma-separated customer .so basenames to load from encrypted assets.",
     ),
     key_dir: Path = typer.Option(Path("artifacts/keys"), "--key-dir"),
+    content_key: Path | None = typer.Option(
+        None, "--key-file", exists=True, dir_okay=False, readable=True,
+        help="Reuse an existing 32-byte content key for reproducible builds.",
+    ),
     alg: str = typer.Option("ecdsa-p256-sha256", "--alg"),
     shell_version: str = typer.Option("0.1.0", "--shell-version"),
     sdk_root: Path | None = typer.Option(None, "--sdk-root"),
@@ -278,6 +282,7 @@ def protect_apk(
                 signing_mode=signing_mode,
                 build_id=batch_id,
                 shell_version=shell_version,
+                key_file=content_key,
                 splits=split,
                 bundletool=bundletool,
                 aab_mode=aab_mode,

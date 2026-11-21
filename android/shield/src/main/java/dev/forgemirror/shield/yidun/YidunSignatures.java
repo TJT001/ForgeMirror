@@ -30,6 +30,7 @@ public final class YidunSignatures {
     public final String library;
     public final String sampleSha256;
     public final String evidence;
+    public final String captured;
 
     public final List<String> suPaths;
     public final List<String> mountMarkers;
@@ -50,6 +51,7 @@ public final class YidunSignatures {
     public final List<String> dex2oatMarkers;
 
     YidunSignatures(String vendor, String library, String sampleSha256, String evidence,
+                    String captured,
                     List<String> suPaths, List<String> mountMarkers,
                     List<String> taskStatusKeys, String zombieMarker,
                     List<String> statusMarkers, List<String> hookMapsMarkers,
@@ -63,6 +65,7 @@ public final class YidunSignatures {
         this.library = library;
         this.sampleSha256 = sampleSha256;
         this.evidence = evidence;
+        this.captured = captured == null ? "" : captured;
         this.suPaths = immutable(suPaths);
         this.mountMarkers = immutable(mountMarkers);
         this.taskStatusKeys = immutable(taskStatusKeys);
@@ -125,6 +128,7 @@ public final class YidunSignatures {
                 library,
                 sampleSha256,
                 evidence,
+                optString(source, "captured"),
                 strings(rootChecks, "su_paths"),
                 strings(rootChecks, "mount_markers"),
                 strings(debug, "task_status_keys"),
@@ -156,7 +160,7 @@ public final class YidunSignatures {
     }
 
     public static YidunSignatures empty() {
-        return new YidunSignatures("", "", "", "",
+        return new YidunSignatures("", "", "", "", "",
                 Collections.emptyList(), Collections.emptyList(),
                 Collections.emptyList(), "",
                 Collections.emptyList(),

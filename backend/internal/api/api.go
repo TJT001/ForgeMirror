@@ -556,7 +556,10 @@ func (s *Server) setClientConfig(c *gin.Context) {
 func knownDetectionRule(rule string) bool {
 	switch rule {
 	case "env_frida", "env_xposed", "env_injection", "env_unpacker",
-		"env_hook", "env_debugger", "env_root", "env_emulator", "file_tamper":
+		"env_hook", "env_debugger", "env_root", "env_emulator", "file_tamper",
+		"yidun_root", "yidun_mount", "yidun_debug", "yidun_hook",
+		"yidun_xposed", "yidun_injection", "yidun_emulator",
+		"yidun_ld_preload", "yidun_dex":
 		return true
 	default:
 		return false

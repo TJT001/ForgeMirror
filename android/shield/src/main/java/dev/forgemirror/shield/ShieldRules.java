@@ -123,7 +123,8 @@ final class ShieldRules {
             if (yidunJson != null) {
                 yidun = YidunSignatures.parse(yidunJson);
                 Log.i(TAG, "yidun signatures vendor=" + yidun.vendor
-                        + " sample=" + yidun.sampleSha256);
+                        + " sample=" + yidun.sampleSha256
+                        + " captured=" + yidun.captured);
             }
             List<Rule> rules = new ArrayList<>();
             JSONArray items = json.getJSONArray("rules");

@@ -20,7 +20,8 @@ public final class YidunProbeTest {
 
     private static YidunSignatures signatures() {
         return new YidunSignatures(
-                "NetEase Yidun", "libnesec.so", "sha256", "docs/research/libnesec_易盾加固还原.md",
+                "NetEase Yidun", "libnesec.so", "sha256",
+                "docs/research/libnesec_易盾加固还原.md", "2026-11-21",
                 list("/system/bin/su", "/system/xbin/su"),
                 list("magisk", "system_root"),
                 list("TracerPid:", "State:"), "(zombie)",

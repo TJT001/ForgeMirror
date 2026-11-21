@@ -65,6 +65,22 @@ ShieldDetect: finding yidun_mount mount:magisk:...
 
 规则加载已前移到 native 文件钩子配置之前，确保来源日志可见；`source=pkr1` 证明运行时使用的是 PKR1 特征而不是内置资产。验证用的 protected APK 在 `artifacts/pkr1-yidun/`（git 忽略）。
 
+### 远程更新验证
+
+环境：Postgres 容器 + `go run ./cmd/api`（`127.0.0.1:8080`），设备通过 `adb reverse tcp:8080 tcp:8080` 访问；protected APK 使用 `--event-url http://127.0.0.1:8080 --event-token dev-client-token`，并用 `--key-file` 复用同一 `k_content`。
+
+| 步骤 | 结果 |
+|---|---|
+| 发布 v3 | `POST /api/v1/rules?...&version=3` 返回 201；`latest current=2` 返回 200/8456 B；`current=3` 返回 204 |
+| 首次启动 | 先加载内置 v2；`ShieldRuleUpdater` 拉取 v3，`remote rules stored version=3`，`rules.version=3` |
+| 二次启动 | `loaded remote rules version=3`，`captured=remote-test-2026-11-21`，`source=pkr1` |
+| 篡改 v4 | 翻转密文 1 字节后发布；设备日志 `rules update failed: SecurityException: signature invalid`，本地仍是 v3，`rules.remote.pkr` 未变 |
+| 合法 v4 | 发布后用一次启动拉取，`remote rules stored version=4`；再启动加载 `captured=remote-v4-recovery`、`version=4` |
+| 版本门控 | `current=3` → 200；`current=4` → 204 |
+| 服务端策略 | `policies:{"yidun_root":"log"}` 被接受并回读；随后重置为空 |
+
+远程包在下次进程启动生效；`rules.remote.pkr` 与 `rules.version` 落在应用私有目录，未通过验签/解密/版本门控时不会覆盖本地文件。测试结束后已停止 API、移除 `adb reverse` 并恢复 debug 包。
+
 ## 验证（本项目实测）
 
 ```text

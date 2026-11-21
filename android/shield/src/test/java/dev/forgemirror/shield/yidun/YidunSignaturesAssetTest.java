@@ -18,6 +18,7 @@ public final class YidunSignaturesAssetTest {
         String json = new String(Files.readAllBytes(asset.toPath()), StandardCharsets.UTF_8);
         assertTrue(json.contains("\"schema\": \"forgemirror.yidun-signatures/1\""));
         assertTrue(json.contains("\"vendor\": \"NetEase Yidun\""));
+        assertTrue(json.contains("\"captured\""));
         assertTrue(json.contains(
                 "8ff576e1cc403f0d6173bee361dabc362be6319f4b71ceb375834600a50005ff"));
         assertTrue(json.contains("\"su_paths\""));
