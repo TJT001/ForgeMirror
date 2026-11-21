@@ -1,6 +1,6 @@
 # 铸镜 ForgeMirror
 
-加固技术研究与复现平台，通过独立实现追求可验证的行为等价。
+是我在 Android逆向过程中对一些商业加固的功能等价实现，用于防护和绕过手段研究
 
 ## 项目结构
 
@@ -14,7 +14,7 @@
 
 ## 当前状态
 
-- Android：容器 v2、内存 DEX/ELF 加载、动态 TLS、Dobby（x86_64）/ShadowHook（arm/arm64）后端、16 KB 页、透明文件保护、PKR1 规则包、运行时检测与事件队列均已实现并有设备/主机证据。
+- Android：容器 v2、内存 DEX/ELF 加载、动态 TLS、白盒化内容密钥、Dobby（x86_64）/ShadowHook（arm/arm64）后端、16 KB 页、透明文件保护、PKR1 规则包、运行时检测与事件队列均已实现并有设备/主机证据。
 - 检测：通用 `env_*` 规则 + 易盾来源的 `yidun_*` 规则；签名特征可随 PKR1 下发并在下次进程启动生效，已实测 v2→v3→v4 远程更新、篡改拒绝和版本门控。
 - 后端：Go API、PostgreSQL、认证/事件/规则/配置接口已实现；PKR1 上传与版本门控可用。
 - 流水线：S0–S8、APK/AAB、universal/default split、多 device-spec 批量、容器/策略/规则/清单、16 KB 对齐与 S8 闸门均有测试覆盖。
@@ -49,6 +49,7 @@ backend/pipeline/scripts/check.sh
 - [16 KB 页适配](docs/evidence/2026-11-21-P2-16kb.md)
 - [split APK / AAB](docs/evidence/2026-11-21-P2-split-aab.md)
 - [自研 loader 动态 TLS](docs/evidence/2026-11-21-P2-tls-relocation.md)
+- [白盒化内容密钥](docs/evidence/2026-11-21-P2-whitebox-key.md)
 - [x86_64 hook 与 API 37](docs/evidence/2026-11-14-P1-api37-hooks.md)
 - [前端加固选项](docs/evidence/2026-11-21-P2-ui-hardening-options.md)
 - [开发环境](docs/开发环境.md)

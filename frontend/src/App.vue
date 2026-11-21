@@ -39,6 +39,7 @@ const decoyDynamic = ref(true)
 const corruptSectionNames = ref(true)
 const selfDecryptText = ref(true)
 const detection = ref(true)
+const whitebox = ref(true)
 const responseMode = ref('toast')
 const alg = ref('ecdsa-p256-sha256')
 const shellVersion = ref('0.1.0')
@@ -215,6 +216,7 @@ async function upload() {
   form.append('corrupt_section_names', String(corruptSectionNames.value))
   form.append('self_decrypt_text', String(selfDecryptText.value))
   form.append('detection', String(detection.value))
+  form.append('whitebox', String(whitebox.value))
   form.append('response', responseMode.value)
   form.append('alg', alg.value)
   form.append('shell_version', shellVersion.value)
@@ -509,6 +511,14 @@ async function cancel() {
                 <span class="toggle-copy">
                   <strong>内置内容密钥</strong>
                   <small>关闭后由授权服务在线取钥</small>
+                </span>
+              </label>
+              <label class="toggle">
+                <input v-model="whitebox" type="checkbox" :disabled="noKeyAsset" />
+                <span class="toggle-box"></span>
+                <span class="toggle-copy">
+                  <strong>白盒密钥库</strong>
+                  <small>用 Chow 白盒 AES 表包裹内容密钥</small>
                 </span>
               </label>
             </div>

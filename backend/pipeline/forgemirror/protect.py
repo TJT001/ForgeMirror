@@ -24,6 +24,7 @@ from .formats.selfdecrypt import add_dt_init_lzss
 from .formats.container import open_container
 from .formats.policy import pack_policy
 from .formats.rules import pack_rules
+from .formats.whitebox import wrap as wrap_whitebox
 from .formats.yara_rules import RUNTIME_RULES
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -121,6 +122,7 @@ class ProtectOptions:
     detection: bool = True
     response: str = "toast"
     max_native_file_mb: int = 128
+    whitebox: bool = False
 
 
 def _stub_from_aar(aar: Path, tools: AndroidTools, tmp: Path) -> tuple[bytes, dict[str, bytes]]:
@@ -418,6 +420,24 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
                             split_drops[source].add(info.filename)
                             split_entries[source].pop(info.filename, None)
 
+        key_asset = "" if options.no_key_asset else "shield/k_content.bin"
+        whitebox_entries: dict[str, bytes] = {}
+        if options.whitebox and not options.no_key_asset:
+            table_path = Path(__file__).with_name("data") / "wbaes.table"
+            if not table_path.is_file():
+                raise SystemExit("white-box table missing from pipeline data")
+            table = table_path.read_bytes()
+            nonce = os.urandom(12)
+            whitebox_entries["assets/shield/wbaes.table"] = table
+            whitebox_entries["assets/shield/k_content.wb"] = wrap_whitebox(
+                table, k_content, nonce
+            )
+            key_asset = "shield/k_content.wb"
+            drop_libs.add("assets/wbaes.table")
+            warnings.append("W_WHITEBOX: content key wrapped by Chow white-box AES")
+        elif options.whitebox:
+            warnings.append("W_WHITEBOX_IGNORED: --no-key-asset disables the vault")
+
         config = {
             "schema": "forgemirror.shield.config/1",
             "original_application": original_application or "",
@@ -426,7 +446,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             "container": "container.fdx",
             "manifest": "shield/manifest.sig",
             "trusted_key": "shield/trusted_key.der",
-            "key": "" if options.no_key_asset else "shield/k_content.bin",
+            "key": key_asset,
             "policy": "shield/policy.pkg",
             "rules": "shield/rules.pkr",
             "build_id": options.build_id,
@@ -468,8 +488,9 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             "assets/shield/rules.pkr": rules_pkg,
             "assets/shield/trusted_key.der": der,
         }
-        if not options.no_key_asset:
+        if not options.no_key_asset and not options.whitebox:
             entries["assets/shield/k_content.bin"] = k_content
+        entries.update(whitebox_entries)
         entries.update(stripped_libs)
         entries.update(shield_libs)
         entries.update(core_assets)
@@ -516,8 +537,9 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
         }
         fixed.update(core_assets)
         fixed.update(native_assets)
-        if not options.no_key_asset:
+        if not options.no_key_asset and not options.whitebox:
             fixed.add("assets/shield/k_content.bin")
+        fixed.update(whitebox_entries)
         artifacts = collect_artifacts(injected, fixed, all_libs=True)
 
         payload = {
@@ -583,6 +605,8 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
         "signing_mode": options.signing_mode,
         "signed": signed,
         "stripped_libs": stripped_count,
+        "whitebox": options.whitebox and not options.no_key_asset,
+        "key_asset": key_asset,
         "split_count": len(split_outputs),
         "splits": split_outputs,
         "in_memory_libs": sorted(selected) if selected else [],

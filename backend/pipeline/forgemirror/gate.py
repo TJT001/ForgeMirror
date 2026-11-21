@@ -20,6 +20,9 @@ from .formats.policy import PolicyError, open_policy
 from .formats.rules import open_rules
 
 DEX_RE = re.compile(r"^classes\d*\.dex$")
+# Stub DEX carries the bootstrap plus the white-box AES runtime (~220 KB with
+# the vault); anything far past that is a business DEX left in the clear.
+STUB_DEX_LIMIT = 320_000
 
 
 def _verify(public_key, signature: bytes, payload: bytes) -> None:
@@ -114,7 +117,7 @@ def _red_team_checks(apk: Path, container: Path, k_content: bytes, manifest: dic
             name for name in archive.namelist() if DEX_RE.match(name)
         )
         stub_size = archive.getinfo("classes.dex").file_size if "classes.dex" in dex_names else 0
-    a2 = dex_names == ["classes.dex"] and stub_size < 200_000 and container_bytes[:4] == b"FDX2"
+    a2 = dex_names == ["classes.dex"] and stub_size < STUB_DEX_LIMIT and container_bytes[:4] == b"FDX2"
     checks.append(_status("a2_no_plaintext_dex", a2,
                           {"dex": dex_names, "stub_size": stub_size}))
 

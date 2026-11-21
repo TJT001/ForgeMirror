@@ -219,6 +219,8 @@ def protect_apk(
                                  help="Detection response: log, toast, degrade, block."),
     max_native_file_mb: int = typer.Option(128, "--max-native-file-mb",
                                            min=1, max=4096),
+    whitebox: bool = typer.Option(False, "--whitebox-key/--no-whitebox-key",
+                                  help="Wrap the embedded content key with the white-box AES vault."),
     key_dir: Path = typer.Option(Path("artifacts/keys"), "--key-dir"),
     content_key: Path | None = typer.Option(
         None, "--key-file", exists=True, dir_okay=False, readable=True,
@@ -330,6 +332,7 @@ def protect_apk(
                 detection=detection,
                 response=response,
                 max_native_file_mb=max_native_file_mb,
+                whitebox=whitebox,
                 alg=alg,
                 splits=effective_splits,
             ),

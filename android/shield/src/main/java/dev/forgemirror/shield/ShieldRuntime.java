@@ -86,6 +86,10 @@ public final class ShieldRuntime {
                 byte[] key;
                 if (config.key != null && !config.key.isEmpty()) {
                     key = ShieldAssets.read(context, config.key);
+                    if (ShieldWhitebox.isWrapped(key)) {
+                        key = ShieldWhitebox.unwrap(context, key);
+                        Log.i(TAG, "content key unwrapped from white-box vault");
+                    }
                 } else {
                     key = ShieldAuthClient.fetchContentKey(context, config);
                     Log.i(TAG, "content key obtained from dev authorization");

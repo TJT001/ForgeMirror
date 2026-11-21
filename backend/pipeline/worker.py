@@ -147,6 +147,8 @@ def build_protect_command(task: dict) -> list[str]:
         command.append("--no-self-decrypt-text")
     if _option(task, "detection", True) is False:
         command.append("--no-detection")
+    if _option(task, "whitebox", False):
+        command.append("--whitebox-key")
     response = _option(task, "response")
     if response:
         command.extend(["--response", str(response)])
