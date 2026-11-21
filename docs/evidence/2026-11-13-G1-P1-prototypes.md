@@ -63,7 +63,7 @@ Demo harness 的 `firstFrameMs` 包含 3 秒探针 sleep，不计入基线。
 | ABI | ARM32 已在 Pixel 5/API 30 验证；x86/x86_64 无真机，仅编译通过 | x86 透明 I/O/block 未验证 |
 | 加载器 | 自研 ELF64/ELF32 loader（PT_LOAD/RELA/REL/RELR/DT_PLTREL/符号/GNU hash/INIT/RELRO/IRELATIVE/COPY）、DT_NEEDED 预加载与平台兜底、依赖 JNI_OnLoad、dlopen 重定向、唯一占位库、fail-closed 回退、safejni | TLS relocation、x86 真机未覆盖；JNI_OnLoad/dlopen 回退有短暂明文窗口 |
 | ART | 适配器为空实现；直接 hook `ClassLinker::VerifyClass` 返回 true 在 API 30 触发 ART SIGABRT，已回退 | 需要安全的 class status 方案；当前无绕过证据，符合 C4 |
-| 构建 | 未处理 split APK/AAB、增量升级；16 KB 页未真机验证 | 需 P2/P4 扩展 |
+| 构建 | split APK 已支持 base+config/feature split 与 install-multiple；AAB 支持 universal 模式；增量升级、按设备 APKS 与 16 KB 页仍未覆盖 | 见 `2026-11-21-P2-split-aab.md` |
 | 设备 | API 26–28、31+、国产 ROM 未覆盖 | G1 矩阵不足 |
 
 ## 下一步建议

@@ -382,6 +382,7 @@ def _encode_string_pool(strings: list[str], flags: int) -> bytes:
     data = bytearray()
     for item in encoded:
         data.extend(item)
+    data.extend(b"\x00" * ((4 - len(data) % 4) % 4))
     size = strings_start + len(data)
     header = struct.pack(
         "<HHIIIIII",

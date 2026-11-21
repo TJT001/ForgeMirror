@@ -23,6 +23,7 @@ def run_inventory(
     shell_version: str = "0.1.0",
     policy_version: int = 0,
     rule_version: int = 0,
+    splits: list[Path] | None = None,
 ) -> Inventory:
     apk = Path(apk)
     badging = parse_badging(tools.badging(apk))
@@ -30,6 +31,13 @@ def run_inventory(
     dex = list_dex(apk)
     libs = list_libs(apk)
     assets = list_assets(apk)
+    split_names: list[str] = []
+    for split in (Path(item) for item in (splits or [])):
+        split_badging = parse_badging(tools.badging(split))
+        split_name = split_badging.split or split.stem
+        split_names.append(split_name)
+        dex.extend(list_dex(split, source=split_name))
+        libs.extend(list_libs(split, source=split_name))
 
     anomalies: list[Anomaly] = []
     for entry in dex:
@@ -91,4 +99,5 @@ def run_inventory(
             "rule_version": rule_version,
         },
         apk_sha256=sha256_file(apk),
+        split_names=split_names,
     )

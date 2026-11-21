@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import struct
 import sys
 import unittest
 from pathlib import Path
@@ -88,6 +89,15 @@ class AxmlTests(unittest.TestCase):
             "dev.forgemirror.shield.ShieldProvider",
         )
         self.assertIsNotNone(roundtrip.find_start("activity"))
+
+    def test_string_pool_is_word_aligned(self) -> None:
+        document = _sample()
+        document.strings.append("odd-length-tag")
+        blob = axml.serialize(document)
+        chunk_type, header_size, size = struct.unpack_from("<HHI", blob, 8)
+        self.assertEqual(chunk_type, 0x0001)
+        self.assertEqual(size % 4, 0)
+        axml.parse(blob)
 
     def test_raise_min_sdk(self) -> None:
         document = Document()

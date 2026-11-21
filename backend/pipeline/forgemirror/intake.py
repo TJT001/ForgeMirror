@@ -31,6 +31,7 @@ def run_intake(
     tools: AndroidTools,
     cert_allowlist: set[str] | None = None,
     allow_unsigned: bool = False,
+    splits: list[Path] | None = None,
 ) -> IntakeResult:
     apk = Path(apk)
     result = IntakeResult(
@@ -99,6 +100,46 @@ def run_intake(
             result.reason_codes.append(errors.E_CERT_MISSING)
     elif cert_allowlist is not None and cert_sha256 not in cert_allowlist:
         result.reason_codes.append(errors.E_CERT_NOT_ALLOWED)
+
+    split_paths = [Path(item) for item in (splits or [])]
+    seen_splits: set[str] = set()
+    for split in split_paths:
+        if not split.is_file():
+            result.reason_codes.append(errors.E_SPLIT_INVALID)
+            continue
+        if not is_zip(split):
+            result.reason_codes.append(errors.E_SPLIT_INVALID)
+            continue
+        try:
+            split_badging = parse_badging(tools.badging(split))
+            split_xmltree = tools.xmltree(split)
+            split_manifest = parse_xmltree(split_xmltree)
+            split_cert = tools.cert_sha256(split)
+        except ToolError:
+            result.reason_codes.append(errors.E_SPLIT_INVALID)
+            continue
+        split_name = split_badging.split or ""
+        if not split_name:
+            result.reason_codes.append(errors.E_SPLIT_INVALID)
+            continue
+        if split_name in seen_splits or split_name == "base":
+            result.reason_codes.append(errors.E_SPLIT_DUPLICATE)
+            continue
+        seen_splits.add(split_name)
+        result.split_names.append(split_name)
+        if (split_badging.package != result.package
+                or split_badging.version_code != result.version_code
+                or split_manifest.package not in (None, result.package)):
+            result.reason_codes.append(errors.E_SPLIT_MISMATCH)
+        if cert_sha256 and split_cert and split_cert != cert_sha256:
+            result.reason_codes.append(errors.E_SPLIT_CERT_MISMATCH)
+        if hardened_markers(split, split_xmltree):
+            result.reason_codes.append(errors.E_ALREADY_HARDENED)
+        for entry in list_dex(split):
+            if not entry.valid:
+                result.reason_codes.append(errors.E_SPLIT_INVALID)
+        result.warnings.append(f"split {split_name}: {split.name}")
+    result.split_count = len(result.split_names)
 
     result.ok = not result.reason_codes
     return result

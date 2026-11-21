@@ -178,6 +178,67 @@ class AndroidTools:
     def verify(self, apk: Path) -> str:
         return self._run([str(self.apksigner), "verify", "--print-certs", str(apk)])
 
+    def _java(self) -> str:
+        java_home = os.environ.get("JAVA_HOME")
+        if java_home:
+            candidate = Path(java_home) / "bin" / "java"
+            if candidate.is_file():
+                return str(candidate)
+        java = shutil.which("java")
+        if java is None:
+            raise ToolError("java not found; required for bundletool")
+        return java
+
+    def _bundletool(self, explicit: Path | None = None) -> list[str]:
+        candidates: list[Path] = []
+        if explicit is not None:
+            candidates.append(Path(explicit))
+        env = os.environ.get("BUNDLETOOL")
+        if env:
+            candidates.append(Path(env))
+        found = shutil.which("bundletool")
+        if found:
+            candidates.append(Path(found))
+        sdk_jar = self.sdk_root / "bundletool.jar"
+        candidates.append(sdk_jar)
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
+            if candidate.suffix == ".jar":
+                return [self._java(), "-jar", str(candidate)]
+            return [str(candidate)]
+        raise ToolError(
+            "bundletool not found; pass --bundletool or set BUNDLETOOL"
+        )
+
+    def aab_to_universal(self, aab: Path, out: Path,
+                         bundletool: Path | None = None) -> Path:
+        import tempfile
+        import zipfile
+
+        command = self._bundletool(bundletool)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="fm-bundletool-") as tmp:
+            apks = Path(tmp) / "bundle.apks"
+            self._run(
+                [
+                    *command,
+                    "build-apks",
+                    f"--bundle={aab}",
+                    f"--output={apks}",
+                    "--mode=universal",
+                    f"--aapt2={self.aapt2}",
+                    "--overwrite",
+                ],
+                timeout=600,
+            )
+            with zipfile.ZipFile(apks) as archive:
+                names = archive.namelist()
+                if "universal.apk" not in names:
+                    raise ToolError("bundletool produced no universal.apk")
+                out.write_bytes(archive.read("universal.apk"))
+        return out
+
     def _android_jar(self) -> Path:
         platforms = self.sdk_root / "platforms"
         if not platforms.is_dir():

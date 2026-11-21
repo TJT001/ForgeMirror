@@ -43,6 +43,7 @@ class DexEntry(BaseModel):
     sha256: str
     version: str | None = None
     valid: bool = True
+    source: str = "base"
 
 
 class LibEntry(BaseModel):
@@ -51,6 +52,7 @@ class LibEntry(BaseModel):
     arch: str | None = None
     size: int
     sha256: str
+    source: str = "base"
 
 
 class AssetEntry(BaseModel):
@@ -85,6 +87,8 @@ class IntakeResult(BaseModel):
     application: str | None = None
     app_component_factory: str | None = None
     abis: list[str] = Field(default_factory=list)
+    split_count: int = 0
+    split_names: list[str] = Field(default_factory=list)
     tool_versions: dict[str, str] = Field(default_factory=dict)
 
 
@@ -108,3 +112,4 @@ class Inventory(BaseModel):
     anomalies: list[Anomaly] = Field(default_factory=list)
     fingerprint: dict[str, str | int] = Field(default_factory=dict)
     apk_sha256: str
+    split_names: list[str] = Field(default_factory=list)

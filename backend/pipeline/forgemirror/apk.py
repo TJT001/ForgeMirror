@@ -41,6 +41,7 @@ class BadgingInfo:
     min_sdk: int | None
     target_sdk: int | None
     native_code: list[str]
+    split: str | None = None
 
 
 def sha256_file(path: Path) -> str:
@@ -64,7 +65,8 @@ def parse_badging(text: str) -> BadgingInfo:
     version_code = None
     version_name = None
     match = re.search(
-        r"package: name='([^']+)'(?: versionCode='([^']+)')?(?: versionName='([^']*)')?",
+        r"package: name='([^']+)'(?: versionCode='([^']+)')?(?: versionName='([^']*)')?"
+        r"(?: split='([^']*)')?",
         text,
     )
     if match:
@@ -84,6 +86,7 @@ def parse_badging(text: str) -> BadgingInfo:
         min_sdk=int(min_match.group(1)) if min_match else None,
         target_sdk=int(target_match.group(1)) if target_match else None,
         native_code=native_code,
+        split=match.group(4) if match and match.group(4) else None,
     )
 
 
@@ -174,7 +177,7 @@ def _natural_dex_key(name: str) -> int:
     return int(suffix) if suffix else 1
 
 
-def list_dex(apk: Path) -> list[DexEntry]:
+def list_dex(apk: Path, source: str = "base") -> list[DexEntry]:
     entries: list[DexEntry] = []
     with zipfile.ZipFile(apk) as archive:
         for info in archive.infolist():
@@ -195,6 +198,7 @@ def list_dex(apk: Path) -> list[DexEntry]:
                     sha256=digest.hexdigest(),
                     version=version,
                     valid=valid,
+                    source=source,
                 )
             )
     entries.sort(key=lambda entry: _natural_dex_key(entry.name))
@@ -212,7 +216,7 @@ def elf_arch(prefix: bytes) -> str | None:
     return ELF_MACHINES.get(machine)
 
 
-def list_libs(apk: Path) -> list[LibEntry]:
+def list_libs(apk: Path, source: str = "base") -> list[LibEntry]:
     entries: list[LibEntry] = []
     with zipfile.ZipFile(apk) as archive:
         for info in archive.infolist():
@@ -233,6 +237,7 @@ def list_libs(apk: Path) -> list[LibEntry]:
                     arch=elf_arch(prefix),
                     size=info.file_size,
                     sha256=digest.hexdigest(),
+                    source=source,
                 )
             )
     entries.sort(key=lambda entry: entry.path)

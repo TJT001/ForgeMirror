@@ -152,13 +152,40 @@ def _red_team_checks(apk: Path, container: Path, k_content: bytes, manifest: dic
     return checks
 
 
-def run_gate(apk: Path, container: Path, k_content: bytes) -> dict:
+def _split_checks(manifest: dict, splits: list[Path]) -> list[dict]:
+    checks: list[dict] = []
+    declared = manifest.get("splits", [])
+    expected = {item.get("file"): item for item in declared}
+    if not declared and splits:
+        return [_status("split_manifest_entries", False,
+                        "split APKs supplied but manifest has none")]
+    if declared and not splits:
+        return [_status("split_set_complete", False,
+                        "manifest declares splits but none supplied")]
+    failures = []
+    for path in splits:
+        item = expected.get(path.name)
+        if item is None:
+            failures.append({"file": path.name, "reason": "not declared"})
+            continue
+        data = path.read_bytes()
+        if len(data) != item.get("size") or \
+                hashlib.sha256(data).hexdigest() != item.get("sha256"):
+            failures.append({"file": path.name, "reason": "hash mismatch"})
+    if splits:
+        checks.append(_status("split_manifest_entries", not failures, failures))
+    return checks
+
+
+def run_gate(apk: Path, container: Path, k_content: bytes,
+             splits: list[Path] | None = None) -> dict:
     checks: list[dict] = []
     manifest, envelope_checks = _verify_envelope(apk)
     checks.extend(envelope_checks)
     if manifest:
         checks.extend(_tamper_check(apk, manifest))
         checks.extend(_red_team_checks(apk, container, k_content, manifest))
+        checks.extend(_split_checks(manifest, list(splits or [])))
 
     try:
         open_container(container.read_bytes(), k_content=k_content)

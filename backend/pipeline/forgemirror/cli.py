@@ -63,6 +63,10 @@ def build(
     key_file: Path | None = typer.Option(None, "--key-file"),
     sdk_root: Path | None = typer.Option(None, "--sdk-root"),
     build_tools: str | None = typer.Option(None, "--build-tools"),
+    split: list[Path] = typer.Option([], "--split", exists=True, dir_okay=False,
+                                     help="Repeatable split APK belonging to the base APK."),
+    bundletool: Path | None = typer.Option(None, "--bundletool",
+                                           help="bundletool executable or standalone jar."),
 ) -> None:
     """Run S0 -> S1 -> S2 and write the build artifacts."""
     if profile not in PROFILES:
@@ -84,6 +88,8 @@ def build(
             allow_unsigned=allow_unsigned,
             shell_version=shell_version,
             key_file=key_file,
+            splits=split,
+            bundletool=bundletool,
         ),
         tools,
     )
@@ -128,6 +134,10 @@ def protect_apk(
     shell_version: str = typer.Option("0.1.0", "--shell-version"),
     sdk_root: Path | None = typer.Option(None, "--sdk-root"),
     build_tools: str | None = typer.Option(None, "--build-tools"),
+    split: list[Path] = typer.Option([], "--split", exists=True, dir_okay=False,
+                                     help="Repeatable split APK belonging to the base APK."),
+    bundletool: Path | None = typer.Option(None, "--bundletool",
+                                           help="bundletool executable or standalone jar."),
 ) -> None:
     """Run S0-S2, rewrite the manifest (S6), align/sign (S7), and gate (S8)."""
     if profile not in PROFILES:
@@ -146,6 +156,8 @@ def protect_apk(
             signing_mode=signing_mode,
             build_id=build_id,
             shell_version=shell_version,
+            splits=split,
+            bundletool=bundletool,
         ),
         tools,
     )
@@ -156,9 +168,10 @@ def protect_apk(
     work_dir = Path(build_result["out"])
     container = work_dir / "container.fdx"
     key_file = work_dir / "keys" / "k_content.bin"
+    effective_apk = Path(build_result.get("apk", apk))
     result = protect(
         ProtectOptions(
-            apk=apk,
+            apk=effective_apk,
             container=container,
             key_file=key_file,
             out=work_dir / "protected.apk",
@@ -177,10 +190,15 @@ def protect_apk(
             self_decrypt_text=self_decrypt_text,
             in_memory_libs=in_memory_libs,
             alg=alg,
+            splits=split,
         ),
         tools,
     )
-    gate = run_gate(work_dir / "protected.apk", container, key_file.read_bytes())
+    base_out = Path(result["apk"])
+    split_dir = base_out.with_name(base_out.stem + "_splits")
+    split_paths = [split_dir / item["file"] for item in result.get("splits", [])]
+    gate = run_gate(base_out, container, key_file.read_bytes(),
+                    splits=split_paths)
     (work_dir / "gate.json").write_text(
         json.dumps(gate, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     )

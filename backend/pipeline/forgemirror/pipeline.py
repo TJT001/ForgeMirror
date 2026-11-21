@@ -11,7 +11,7 @@ from pathlib import Path
 from .dex_stage import run_dex_stage
 from .intake import run_intake
 from .inventory import run_inventory
-from .tools import AndroidTools
+from .tools import AndroidTools, ToolError
 
 
 @dataclass
@@ -25,6 +25,8 @@ class BuildOptions:
     allow_unsigned: bool = False
     shell_version: str = "0.1.0"
     key_file: Path | None = None
+    splits: list[Path] | None = None
+    bundletool: Path | None = None
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -36,14 +38,42 @@ def run_build(options: BuildOptions, tools: AndroidTools) -> dict:
     out_dir = Path(options.out) if options.out is not None else Path("artifacts") / build_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    apk = Path(options.apk)
+    bundled = apk.suffix.lower() == ".aab"
+    if bundled:
+        if options.splits:
+            return {
+                "ok": False,
+                "stage": "s0",
+                "build_id": build_id,
+                "out": str(out_dir),
+                "reason_codes": ["E_AAB_INVALID"],
+                "warnings": ["--split cannot be combined with .aab input"],
+            }
+        try:
+            apk = tools.aab_to_universal(
+                apk, out_dir / "universal.apk", options.bundletool
+            )
+        except ToolError as error:
+            code = "E_BUNDLETOOL_MISSING" if "bundletool not found" in str(error) else "E_AAB_INVALID"
+            return {
+                "ok": False,
+                "stage": "s0",
+                "build_id": build_id,
+                "out": str(out_dir),
+                "reason_codes": [code],
+                "warnings": [str(error)],
+            }
+
     intake = run_intake(
-        options.apk,
+        apk,
         build_id=build_id,
         profile=options.profile,
         signing_mode=options.signing_mode,
         tools=tools,
         cert_allowlist=options.cert_allowlist,
-        allow_unsigned=options.allow_unsigned,
+        allow_unsigned=options.allow_unsigned or bundled,
+        splits=options.splits,
     )
     _write_json(out_dir / "intake.json", intake.model_dump(mode="json", by_alias=True))
     if not intake.ok:
@@ -57,17 +87,23 @@ def run_build(options: BuildOptions, tools: AndroidTools) -> dict:
         }
 
     inventory = run_inventory(
-        options.apk, tools=tools, shell_version=options.shell_version
+        apk, tools=tools, shell_version=options.shell_version,
+        splits=options.splits,
     )
     _write_json(out_dir / "inventory.json", inventory.model_dump(mode="json", by_alias=True))
 
+    split_apks = {
+        name: path
+        for name, path in zip(intake.split_names, options.splits or [])
+    }
     dex_result = run_dex_stage(
-        options.apk,
+        apk,
         inventory,
         out_dir,
         build_id=build_id,
         profile=options.profile,
         key_file=options.key_file,
+        split_apks=split_apks,
     )
 
     artifacts = []
@@ -87,6 +123,11 @@ def run_build(options: BuildOptions, tools: AndroidTools) -> dict:
             "package": inventory.package,
             "version_code": inventory.version_code,
             "cert_sha256": intake.cert_sha256,
+            "splits": [
+                {"name": name,
+                 "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+                for name, path in zip(intake.split_names, options.splits or [])
+            ],
         },
         "shell": {"version": options.shell_version, "container": "FDX2"},
         "artifacts": artifacts,
@@ -111,4 +152,6 @@ def run_build(options: BuildOptions, tools: AndroidTools) -> dict:
         "key_file": str(dex_result.key_file),
         "warnings": intake.warnings,
         "anomalies": [anomaly.model_dump() for anomaly in inventory.anomalies],
+        "split_names": intake.split_names,
+        "apk": str(apk),
     }

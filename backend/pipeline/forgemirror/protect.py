@@ -13,11 +13,11 @@ import secrets
 import tempfile
 import uuid
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from uuid import UUID
 from pathlib import Path
 
-from .apk import elf_arch
+from .apk import elf_arch, parse_badging, sha256_file
 from .formats import axml
 from .formats.elf import ElfError, add_dynamic_decoy
 from .formats.selfdecrypt import add_dt_init_lzss
@@ -98,6 +98,7 @@ class ProtectOptions:
     corrupt_section_names: bool = True
     self_decrypt_text: bool = True
     in_memory_libs: str = ""
+    splits: list[Path] = field(default_factory=list)
 
 
 def _stub_from_aar(aar: Path, tools: AndroidTools, tmp: Path) -> tuple[bytes, dict[str, bytes]]:
@@ -179,20 +180,32 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
     if not container.startswith(b"FDX2"):
         raise SystemExit("container does not start with FDX2")
 
+    split_names: list[str] = []
+    for split in options.splits:
+        name = parse_badging(tools.badging(split)).split
+        if not name:
+            raise SystemExit(f"split APK has no split name: {split}")
+        split_names.append(name)
+    if len(set(split_names)) != len(split_names):
+        raise SystemExit("duplicate split names")
+
+    sources = [options.apk, *options.splits]
+    for source in sources:
+        with zipfile.ZipFile(source) as archive:
+            for info in archive.infolist():
+                if not info.filename.startswith("lib/") or not info.filename.endswith(".so"):
+                    continue
+                parts = info.filename.split("/")
+                if len(parts) < 3:
+                    continue
+                expected = "armeabi-v7a" if parts[1] == "armeabi" else parts[1]
+                arch = elf_arch(archive.read(info.filename)[:20])
+                if arch != expected:
+                    raise SystemExit(
+                        f"ABI mismatch in {info.filename}: ELF {arch} != dir {expected}"
+                    )
     with zipfile.ZipFile(options.apk) as archive:
         original_manifest = archive.read("AndroidManifest.xml")
-        for info in archive.infolist():
-            if not info.filename.startswith("lib/") or not info.filename.endswith(".so"):
-                continue
-            parts = info.filename.split("/")
-            if len(parts) < 3:
-                continue
-            expected = "armeabi-v7a" if parts[1] == "armeabi" else parts[1]
-            arch = elf_arch(archive.read(info.filename)[:20])
-            if arch != expected:
-                raise SystemExit(
-                    f"ABI mismatch in {info.filename}: ELF {arch} != dir {expected}"
-                )
     document = axml.parse(original_manifest)
     package = document.package_name()
     if not package:
@@ -294,48 +307,67 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             drop_libs.update(core_libs)
 
         stripped_libs: dict[str, bytes] = {}
+        split_entries: dict[Path, dict[str, bytes]] = {
+            split: {} for split in options.splits
+        }
+        split_drops: dict[Path, set[str]] = {
+            split: set() for split in options.splits
+        }
+        stripped_count = 0
         if options.strip_customer_libs:
-            with zipfile.ZipFile(options.apk) as archive:
-                for info in archive.infolist():
-                    if not info.filename.startswith("lib/") or not info.filename.endswith(".so"):
-                        continue
-                    if info.filename.endswith(("libshield_boot.so", "libshield_core.so")):
-                        continue
-                    try:
-                        stripped_libs[info.filename] = tools.strip_so(
-                            archive.read(info.filename), Path(info.filename).name
-                        )
-                    except Exception as error:
-                        warnings.append(f"strip failed for {info.filename}: {error}")
+            for source in sources:
+                target = stripped_libs if source == options.apk else split_entries[source]
+                with zipfile.ZipFile(source) as archive:
+                    for info in archive.infolist():
+                        if not info.filename.startswith("lib/") or not info.filename.endswith(".so"):
+                            continue
+                        if info.filename.endswith(("libshield_boot.so", "libshield_core.so")):
+                            continue
+                        try:
+                            target[info.filename] = tools.strip_so(
+                                archive.read(info.filename), Path(info.filename).name
+                            )
+                            stripped_count += 1
+                        except Exception as error:
+                            warnings.append(f"strip failed for {info.filename}: {error}")
 
         native_assets: dict[str, bytes] = {}
         selected = {name.strip() for name in options.in_memory_libs.split(",")
                     if name.strip()}
         if selected:
             native_key = _native_key(k_content, options.build_id)
-            with zipfile.ZipFile(options.apk) as archive:
-                for info in archive.infolist():
-                    if not info.filename.startswith("lib/") or not info.filename.endswith(".so"):
-                        continue
-                    parts = info.filename.split("/")
-                    if len(parts) < 3:
-                        continue
-                    base = parts[-1]
-                    if base not in selected:
-                        continue
-                    data = stripped_libs.get(info.filename)
-                    if data is None:
-                        data = archive.read(info.filename)
-                    native_assets[
-                        f"assets/shield/native/{parts[1]}/{base}.enc"
-                    ] = _encrypt_native(data, native_key)
-                    holder = "libshield_holder_" + hashlib.sha256(
-                        base.encode("utf-8")).hexdigest()[:16] + ".so"
-                    template = f"lib/{parts[1]}/libshield_dummy.so"
-                    if template in shield_libs:
-                        shield_libs[f"lib/{parts[1]}/{holder}"] = shield_libs[template]
-                    drop_libs.add(info.filename)
-                    stripped_libs.pop(info.filename, None)
+            for source in sources:
+                with zipfile.ZipFile(source) as archive:
+                    for info in archive.infolist():
+                        if not info.filename.startswith("lib/") or not info.filename.endswith(".so"):
+                            continue
+                        parts = info.filename.split("/")
+                        if len(parts) < 3:
+                            continue
+                        base = parts[-1]
+                        if base not in selected:
+                            continue
+                        data = None
+                        if source == options.apk:
+                            data = stripped_libs.get(info.filename)
+                        else:
+                            data = split_entries[source].get(info.filename)
+                        if data is None:
+                            data = archive.read(info.filename)
+                        native_assets[
+                            f"assets/shield/native/{parts[1]}/{base}.enc"
+                        ] = _encrypt_native(data, native_key)
+                        holder = "libshield_holder_" + hashlib.sha256(
+                            base.encode("utf-8")).hexdigest()[:16] + ".so"
+                        template = f"lib/{parts[1]}/libshield_dummy.so"
+                        if template in shield_libs:
+                            shield_libs[f"lib/{parts[1]}/{holder}"] = shield_libs[template]
+                        if source == options.apk:
+                            drop_libs.add(info.filename)
+                            stripped_libs.pop(info.filename, None)
+                        else:
+                            split_drops[source].add(info.filename)
+                            split_entries[source].pop(info.filename, None)
 
         config = {
             "schema": "forgemirror.shield.config/1",
@@ -397,6 +429,34 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
         injected = tmp / "injected.apk"
         _rewrite_zip(options.apk, injected, entries, drop_libs)
 
+        split_outputs: list[dict] = []
+        split_dir = options.out.with_name(options.out.stem + "_splits")
+        if options.splits:
+            split_dir.mkdir(parents=True, exist_ok=True)
+        used_names: set[str] = set()
+        for index, (split, split_name) in enumerate(
+                zip(options.splits, split_names)):
+            staged = tmp / f"split-{index}.apk"
+            _rewrite_zip(split, staged, split_entries[split],
+                         split_drops[split])
+            target_name = Path(split.name).name
+            if target_name in used_names:
+                target_name = f"{index}_{target_name}"
+            used_names.add(target_name)
+            target = split_dir / target_name
+            if options.signing_mode == "customer_local":
+                tools.align_apk(staged, target)
+            else:
+                aligned_split = tmp / f"split-{index}-aligned.apk"
+                tools.align_apk(staged, aligned_split)
+                tools.sign_debug(aligned_split, target)
+            split_outputs.append({
+                "name": split_name,
+                "file": target.name,
+                "size": target.stat().st_size,
+                "sha256": sha256_file(target),
+            })
+
         fixed = {
             "classes.dex",
             "assets/container.fdx",
@@ -424,6 +484,8 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             },
             "artifacts": artifacts,
         }
+        if split_outputs:
+            payload["splits"] = split_outputs
         envelope = build_envelope(payload, signing_key, options.alg)
 
         with_manifest = tmp / "manifest.apk"
@@ -436,6 +498,23 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             tools.align_apk(with_manifest, aligned)
             tools.sign_debug(aligned, options.out)
             signed = True
+
+        if split_outputs:
+            set_manifest = {
+                "schema": "forgemirror.apk-set/1",
+                "package": package,
+                "version_code": version_code,
+                "signing_mode": options.signing_mode,
+                "base": {
+                    "file": options.out.name,
+                    "sha256": sha256_file(options.out),
+                },
+                "splits": split_outputs,
+            }
+            options.out.with_name(options.out.name + ".splits.json").write_text(
+                json.dumps(set_manifest, indent=2, sort_keys=True,
+                           ensure_ascii=False) + "\n"
+            )
 
     signer = parse_signer(tools.verify(options.out)) if signed else None
     meta = {
@@ -454,7 +533,9 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
         "algorithm": options.alg,
         "signing_mode": options.signing_mode,
         "signed": signed,
-        "stripped_libs": len(stripped_libs),
+        "stripped_libs": stripped_count,
+        "split_count": len(split_outputs),
+        "splits": split_outputs,
         "in_memory_libs": sorted(selected) if selected else [],
         "rule_count": len(DEFAULT_RULES["rules"]),
         "warnings": warnings,

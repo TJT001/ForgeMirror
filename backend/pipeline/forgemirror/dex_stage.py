@@ -43,6 +43,7 @@ def run_dex_stage(
     profile: str,
     k_content: bytes | None = None,
     key_file: Path | None = None,
+    split_apks: dict[str, Path] | None = None,
 ) -> DexStageResult:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -51,9 +52,21 @@ def run_dex_stage(
     if not entries:
         raise StageError(errors.E_NO_DEX)
 
-    files = [
-        FileSpec(name=entry.name, data=read_apk_entry(apk, entry.name)) for entry in entries
-    ]
+    sources = {"base": Path(apk)}
+    sources.update(split_apks or {})
+    files: list[FileSpec] = []
+    file_sources: list[str] = []
+    for entry in entries:
+        source = entry.source if entry.source in sources else "base"
+        data = read_apk_entry(sources[source], entry.name)
+        if source == "base":
+            name = entry.name
+        else:
+            safe = "".join(char if char.isalnum() or char in "._-" else "_"
+                           for char in source)
+            name = f"{safe}/{entry.name}"
+        files.append(FileSpec(name=name, data=data))
+        file_sources.append(source)
 
     if k_content is None and key_file is not None and Path(key_file).is_file():
         k_content = Path(key_file).read_bytes()
@@ -88,6 +101,7 @@ def run_dex_stage(
                 "size": len(spec.data),
                 "sha256": hashlib.sha256(spec.data).hexdigest(),
                 "chunk_count": (len(spec.data) + CHUNK_SIZE - 1) // CHUNK_SIZE,
+                "source": file_sources[index],
             }
             for index, spec in enumerate(files)
         ],
