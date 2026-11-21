@@ -93,6 +93,7 @@ ANDROID_SERIAL=<serial> ./gradlew :app:connectedDebugAndroidTest \
 6. 易盾 ROM 品牌包名（`com.samsung.` 等）只作研究上下文，未接入扫描，避免大面积误报。
 7. 通用 `env_*` 与易盾 `yidun_*` 可能对同一条件各记一条事件；evidence 相同的会去重，保留双规则是为了来源可追溯。
 8. mount 命中已按标记去重：同一标记只报一条，避免 Magisk 多行挂载刷屏。
+9. maps 只做路径/标记匹配，未实现 libnesec 的 AArch64 ELF `e_machine` 过滤；`VMOS_MANAGER_SERVICE` 服务探针也未接入。
 
 ## 下一步
 
