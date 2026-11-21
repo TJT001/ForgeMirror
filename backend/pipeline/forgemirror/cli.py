@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from pathlib import Path
 
 import typer
@@ -147,9 +148,9 @@ def protect_apk(
                                            help="bundletool executable or standalone jar."),
     aab_mode: str = typer.Option("universal", "--aab-mode",
                                  help="AAB conversion mode: universal or split."),
-    device_spec: Path | None = typer.Option(None, "--device-spec", exists=True,
-                                            dir_okay=False,
-                                            help="bundletool device spec for --aab-mode=split."),
+    device_spec: list[Path] = typer.Option([], "--device-spec", exists=True,
+                                           dir_okay=False,
+                                           help="Repeatable bundletool device spec for --aab-mode=split."),
 ) -> None:
     """Run S0-S2, rewrite the manifest (S6), align/sign (S7), and gate (S8)."""
     if profile not in PROFILES:
@@ -160,65 +161,128 @@ def protect_apk(
         raise typer.Exit(2)
 
     tools = _discover(sdk_root, build_tools)
-    build_result = run_build(
-        BuildOptions(
-            apk=apk,
-            out=out,
-            profile=profile,
-            signing_mode=signing_mode,
-            build_id=build_id,
-            shell_version=shell_version,
-            splits=split,
-            bundletool=bundletool,
-            aab_mode=aab_mode,
-            device_spec=device_spec,
-        ),
-        tools,
-    )
-    if not build_result["ok"]:
-        _echo(build_result)
-        raise typer.Exit(1)
+    if device_spec and (apk.suffix.lower() != ".aab" or aab_mode != "split"):
+        typer.echo("--device-spec requires .aab with --aab-mode split", err=True)
+        raise typer.Exit(2)
+    if len(device_spec) > 1:
+        if apk.suffix.lower() != ".aab" or aab_mode != "split":
+            typer.echo("multiple --device-spec requires .aab with --aab-mode split",
+                       err=True)
+            raise typer.Exit(2)
+        if split:
+            typer.echo("--split cannot be combined with AAB device specs", err=True)
+            raise typer.Exit(2)
 
-    work_dir = Path(build_result["out"])
-    container = work_dir / "container.fdx"
-    key_file = work_dir / "keys" / "k_content.bin"
-    effective_apk = Path(build_result.get("apk", apk))
-    effective_splits = [Path(item) for item in build_result.get("splits", [])]
-    result = protect(
-        ProtectOptions(
-            apk=effective_apk,
-            container=container,
-            key_file=key_file,
-            out=work_dir / "protected.apk",
-            build_id=build_result["build_id"],
-            aar=shield_aar,
-            profile=profile,
-            signing_mode=signing_mode,
-            auth_url=auth_url,
-            event_url=event_url,
-            event_token=event_token,
-            no_key_asset=no_key_asset,
-            key_dir=key_dir,
-            self_decrypt_core=self_decrypt_core,
-            decoy_dynamic=decoy_dynamic,
-            corrupt_section_names=corrupt_section_names,
-            self_decrypt_text=self_decrypt_text,
-            in_memory_libs=in_memory_libs,
-            alg=alg,
-            splits=effective_splits,
-        ),
-        tools,
+    batch_id = build_id or str(uuid.uuid4())
+    specs: list[Path | None] = list(device_spec) or [None]
+    batch_root = out
+    if len(specs) > 1 and batch_root is None:
+        batch_root = Path("artifacts") / batch_id
+    used_names: set[str] = set()
+
+    def protect_one(spec: Path | None, index: int) -> dict:
+        if len(specs) == 1:
+            work_out = out
+        else:
+            assert batch_root is not None
+            stem = (spec.stem if spec is not None else "default")
+            safe = "".join(char if char.isalnum() or char in "._-" else "_"
+                           for char in stem)
+            name = f"{index:02d}_{safe}"
+            while name in used_names:
+                name = f"{index:02d}_{safe}_{len(used_names)}"
+            used_names.add(name)
+            work_out = Path(batch_root) / name
+        build_result = run_build(
+            BuildOptions(
+                apk=apk,
+                out=work_out,
+                profile=profile,
+                signing_mode=signing_mode,
+                build_id=batch_id,
+                shell_version=shell_version,
+                splits=split,
+                bundletool=bundletool,
+                aab_mode=aab_mode,
+                device_spec=spec,
+            ),
+            tools,
+        )
+        if not build_result["ok"]:
+            return {"ok": False, "spec": str(spec) if spec else None,
+                    "build": build_result}
+
+        work_dir = Path(build_result["out"])
+        container = work_dir / "container.fdx"
+        key_file = work_dir / "keys" / "k_content.bin"
+        effective_apk = Path(build_result.get("apk", apk))
+        effective_splits = [Path(item) for item in build_result.get("splits", [])]
+        result = protect(
+            ProtectOptions(
+                apk=effective_apk,
+                container=container,
+                key_file=key_file,
+                out=work_dir / "protected.apk",
+                build_id=build_result["build_id"],
+                aar=shield_aar,
+                profile=profile,
+                signing_mode=signing_mode,
+                auth_url=auth_url,
+                event_url=event_url,
+                event_token=event_token,
+                no_key_asset=no_key_asset,
+                key_dir=key_dir,
+                self_decrypt_core=self_decrypt_core,
+                decoy_dynamic=decoy_dynamic,
+                corrupt_section_names=corrupt_section_names,
+                self_decrypt_text=self_decrypt_text,
+                in_memory_libs=in_memory_libs,
+                alg=alg,
+                splits=effective_splits,
+            ),
+            tools,
+        )
+        base_out = Path(result["apk"])
+        split_dir = base_out.with_name(base_out.stem + "_splits")
+        split_paths = [split_dir / item["file"]
+                       for item in result.get("splits", [])]
+        gate = run_gate(base_out, container, key_file.read_bytes(),
+                        splits=split_paths)
+        (work_dir / "gate.json").write_text(
+            json.dumps(gate, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+        )
+        return {"ok": gate["passed"], "spec": str(spec) if spec else None,
+                "out": str(work_dir), "build": build_result,
+                "result": result, "gate": gate}
+
+    if len(specs) == 1:
+        outcome = protect_one(specs[0], 0)
+        if "build" in outcome and "result" not in outcome:
+            _echo(outcome["build"])
+            raise typer.Exit(1)
+        _echo({**outcome["result"], "gate": outcome["gate"]})
+        if not outcome["ok"]:
+            raise typer.Exit(1)
+        return
+
+    assert batch_root is not None
+    batch_root = Path(batch_root)
+    batch_root.mkdir(parents=True, exist_ok=True)
+    outcomes = [protect_one(spec, index)
+                for index, spec in enumerate(specs)]
+    batch = {
+        "schema": "forgemirror.aab-batch/1",
+        "batch_id": batch_id,
+        "aab": str(apk),
+        "device_specs": [str(spec) for spec in specs if spec is not None],
+        "ok": all(item["ok"] for item in outcomes),
+        "sets": outcomes,
+    }
+    (batch_root / "batch.json").write_text(
+        json.dumps(batch, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     )
-    base_out = Path(result["apk"])
-    split_dir = base_out.with_name(base_out.stem + "_splits")
-    split_paths = [split_dir / item["file"] for item in result.get("splits", [])]
-    gate = run_gate(base_out, container, key_file.read_bytes(),
-                    splits=split_paths)
-    (work_dir / "gate.json").write_text(
-        json.dumps(gate, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
-    )
-    _echo({**result, "gate": gate})
-    if not gate["passed"]:
+    _echo(batch)
+    if not batch["ok"]:
         raise typer.Exit(1)
 
 
