@@ -21,6 +21,8 @@ interface SecurityEvent {
   created_at: string
 }
 
+type DropKind = 'source' | 'splits' | 'specs'
+
 const file = ref<File | null>(null)
 const splits = ref<File[]>([])
 const deviceSpecs = ref<File[]>([])
@@ -41,7 +43,6 @@ const responseMode = ref('toast')
 const alg = ref('ecdsa-p256-sha256')
 const shellVersion = ref('0.1.0')
 const maxNativeFileMb = ref(128)
-const advancedOpen = ref(['advanced'])
 
 const taskId = ref('')
 const status = ref('')
@@ -52,6 +53,11 @@ const knownKinds = ref<string[]>([])
 const progress = ref(0)
 const error = ref('')
 const busy = ref(false)
+const dragging = ref<Record<DropKind, boolean>>({
+  source: false,
+  splits: false,
+  specs: false,
+})
 
 const artifactUrl = computed(() =>
   taskId.value && status.value === 'succeeded'
@@ -61,16 +67,48 @@ const artifactUrl = computed(() =>
 const sourceIsAab = computed(() =>
   file.value?.name.toLowerCase().endsWith('.aab') ?? false,
 )
+const sourceName = computed(() => file.value?.name ?? '')
+const embeddedKey = computed({
+  get: () => !noKeyAsset.value,
+  set: (value: boolean) => {
+    noKeyAsset.value = !value
+  },
+})
+const recentEvents = computed(() => [...events.value].reverse().slice(0, 10))
+const selectedLibs = computed(() =>
+  inMemoryLibs.value.split(',').map((value) => value.trim()).filter(Boolean),
+)
+const statusLabel = computed(() => {
+  switch (status.value) {
+    case 'queued': return '排队中'
+    case 'running': return '运行中'
+    case 'succeeded': return '已完成'
+    case 'failed': return '失败'
+    case 'canceled': return '已取消'
+    case 'disconnected': return '连接中断'
+    default: return '未开始'
+  }
+})
+const statusTone = computed(() => {
+  if (status.value === 'succeeded') return 'ok'
+  if (status.value === 'failed') return 'bad'
+  if (status.value === 'running') return 'live'
+  return 'idle'
+})
 
-function onFileChange(event: Event) {
-  const input = event.target as HTMLInputElement
-  file.value = input.files?.[0] ?? null
+function selectSource(next: File | null) {
+  file.value = next
   if (sourceIsAab.value) {
     splits.value = []
   } else {
     deviceSpecs.value = []
     aabMode.value = 'universal'
   }
+}
+
+function onFileChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  selectSource(input.files?.[0] ?? null)
 }
 
 function onSplitsChange(event: Event) {
@@ -81,6 +119,25 @@ function onSplitsChange(event: Event) {
 function onSpecsChange(event: Event) {
   const input = event.target as HTMLInputElement
   deviceSpecs.value = Array.from(input.files ?? [])
+}
+
+function onDrop(kind: DropKind, event: DragEvent) {
+  event.preventDefault()
+  dragging.value[kind] = false
+  if (kind === 'splits' && sourceIsAab.value) {
+    return
+  }
+  if (kind === 'specs' && aabMode.value !== 'split') {
+    return
+  }
+  const files = Array.from(event.dataTransfer?.files ?? [])
+  if (kind === 'source') {
+    selectSource(files[0] ?? null)
+  } else if (kind === 'splits') {
+    splits.value = files
+  } else {
+    deviceSpecs.value = files
+  }
 }
 
 async function loadSecurityEvents() {
@@ -112,7 +169,7 @@ async function upload() {
   status.value = ''
   progress.value = 0
   if (!file.value) {
-    error.value = '请选择 APK 或 AAB 文件'
+    error.value = '请先选择 APK 或 AAB 主包'
     return
   }
   const extension = file.value.name.toLowerCase().slice(file.value.name.lastIndexOf('.'))
@@ -121,7 +178,7 @@ async function upload() {
     return
   }
   if (extension === '.aab' && splits.value.length > 0) {
-    error.value = 'AAB 输入不能再附加 split APK'
+    error.value = 'AAB 输入不能附加 split APK'
     return
   }
   if (deviceSpecs.value.length > 0 &&
@@ -135,6 +192,10 @@ async function upload() {
   }
   if (aabMode.value === 'split' && deviceSpecs.value.length === 0) {
     error.value = 'AAB split 模式至少需要一个 device spec JSON'
+    return
+  }
+  if (maxNativeFileMb.value < 1 || maxNativeFileMb.value > 4096) {
+    error.value = 'native 上限需在 1–4096 MB 之间'
     return
   }
 
@@ -217,274 +278,688 @@ async function cancel() {
 </script>
 
 <template>
-  <main class="page">
-    <header>
-      <h1>ForgeMirror</h1>
-      <p class="subtitle">APK/AAB 加固流水线 · 上传 → 任务 → 产物</p>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 44 44" aria-hidden="true">
+          <path d="M4 8h14l8 10-8 10H4z" />
+          <path d="M40 8H26l-8 10 8 10h14z" class="mirror" />
+          <path d="M8 36h28" class="rule" />
+        </svg>
+        <div class="brand-text">
+          <span class="brand-name">ForgeMirror</span>
+          <span class="brand-sub">授权加固工作台</span>
+        </div>
+      </div>
+      <div class="topbar-meta">
+        <span class="signal"></span>
+        <span>本地构建通道</span>
+        <span class="slash">/</span>
+        <span class="mono">v0.1</span>
+      </div>
     </header>
 
-    <section class="card">
-      <div class="row">
-        <label class="label">输入</label>
-        <input type="file" accept=".apk,.aab" @change="onFileChange" />
-        <span class="hint">{{ sourceIsAab ? 'AAB' : 'APK' }}</span>
-      </div>
-      <div v-if="!sourceIsAab" class="row">
-        <label class="label">Split APK</label>
-        <input type="file" accept=".apk" multiple @change="onSplitsChange" />
-        <span class="hint">可选，base APK 对应的 config/feature split</span>
-      </div>
-      <div class="row">
-        <label class="label">Device spec</label>
-        <input type="file" accept=".json" multiple @change="onSpecsChange" />
-        <span class="hint">仅 AAB split 模式，每个 JSON 生成一套产物</span>
-      </div>
-      <div class="row">
-        <label class="label">Profile</label>
-        <el-select v-model="profile" style="width: 180px">
-          <el-option label="basic" value="basic" />
-          <el-option label="enhanced" value="enhanced" />
-          <el-option label="financial" value="financial" />
-        </el-select>
-        <label class="label">签名</label>
-        <el-select v-model="signingMode" style="width: 200px">
-          <el-option label="客户本地签名" value="customer_local" />
-          <el-option label="平台 HSM" value="hsm" />
-        </el-select>
-        <label class="label">AAB 模式</label>
-        <el-select v-model="aabMode" style="width: 180px">
-          <el-option label="universal" value="universal" />
-          <el-option label="split（按设备拆分）" value="split" />
-        </el-select>
-      </div>
+    <main class="workspace">
+      <aside class="rail">
+        <p class="rail-label">运行摘要</p>
+        <h1 class="rail-title">{{ taskId ? '加固任务' : '尚未开始' }}</h1>
+        <p v-if="taskId" class="rail-id">{{ taskId }}</p>
 
-      <el-collapse v-model="advancedOpen" class="advanced">
-        <el-collapse-item title="高级加固选项" name="advanced">
-          <div class="grid">
-            <label class="field">
-              <span class="label">内存加载库</span>
-              <el-input v-model="inMemoryLibs" placeholder="libfoo.so,libbar.so" />
-            </label>
-            <label class="field">
-              <span class="label">签名算法</span>
-              <el-select v-model="alg">
-                <el-option label="ECDSA P-256" value="ecdsa-p256-sha256" />
-                <el-option label="Ed25519" value="ed25519" />
-              </el-select>
-            </label>
-            <label class="field">
-              <span class="label">响应模式</span>
-              <el-select v-model="responseMode">
-                <el-option label="log" value="log" />
-                <el-option label="toast" value="toast" />
-                <el-option label="degrade" value="degrade" />
-                <el-option label="block" value="block" />
-              </el-select>
-            </label>
-            <label class="field">
-              <span class="label">Shell 版本</span>
-              <el-input v-model="shellVersion" />
-            </label>
-            <label class="field">
-              <span class="label">单文件 native 上限 (MB)</span>
-              <el-input-number v-model="maxNativeFileMb" :min="1" :max="4096" />
-            </label>
-            <label class="field">
-              <span class="label">授权服务 URL</span>
-              <el-input v-model="authUrl" placeholder="https://..." />
-            </label>
-            <label class="field">
-              <span class="label">事件服务 URL</span>
-              <el-input v-model="eventUrl" placeholder="https://..." />
-            </label>
-            <label class="field">
-              <span class="label">事件 Token</span>
-              <el-input v-model="eventToken" type="password" show-password />
-            </label>
+        <dl class="summary">
+          <div>
+            <dt>主包</dt>
+            <dd>{{ sourceName || '未选择' }}</dd>
           </div>
-          <div class="toggles">
-            <el-checkbox v-model="selfDecryptCore">Core 自解密</el-checkbox>
-            <el-checkbox v-model="decoyDynamic">双 PT_DYNAMIC 诱饵</el-checkbox>
-            <el-checkbox v-model="corruptSectionNames">破坏 section 名表</el-checkbox>
-            <el-checkbox v-model="selfDecryptText">Text 段自解密</el-checkbox>
-            <el-checkbox v-model="detection">运行时检测</el-checkbox>
-            <el-checkbox v-model="noKeyAsset">不内置内容密钥</el-checkbox>
+          <div>
+            <dt>输入类型</dt>
+            <dd>{{ sourceIsAab ? 'AAB' : 'APK' }}</dd>
           </div>
-        </el-collapse-item>
-      </el-collapse>
+          <div>
+            <dt>Split</dt>
+            <dd>{{ splits.length }} 个</dd>
+          </div>
+          <div>
+            <dt>Device spec</dt>
+            <dd>{{ deviceSpecs.length }} 个</dd>
+          </div>
+          <div>
+            <dt>Profile</dt>
+            <dd>{{ profile }}</dd>
+          </div>
+          <div>
+            <dt>签名</dt>
+            <dd>{{ signingMode === 'hsm' ? '平台 HSM' : '客户本地' }}</dd>
+          </div>
+          <div>
+            <dt>内存库</dt>
+            <dd>{{ selectedLibs.length ? selectedLibs.join(', ') : '未指定' }}</dd>
+          </div>
+        </dl>
 
-      <div class="row actions">
-        <el-button type="primary" :loading="busy" @click="upload">开始加固</el-button>
-        <el-button v-if="busy" @click="cancel">取消</el-button>
-        <el-button v-if="artifactUrl" tag="a" :href="artifactUrl" type="success">
-          下载加固产物
-        </el-button>
-      </div>
-      <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" />
-    </section>
+        <div class="rail-status">
+          <div class="status-line">
+            <span class="status-dot" :class="statusTone"></span>
+            <span>{{ statusLabel }}</span>
+            <span v-if="taskId" class="mono status-percent">{{ progress }}%</span>
+          </div>
+          <div class="meter"><span :style="{ width: `${progress}%` }"></span></div>
+        </div>
 
-    <section v-if="taskId" class="card">
-      <div class="meta">
-        <span>任务：{{ taskId }}</span>
-        <span>状态：<b>{{ status }}</b></span>
-      </div>
-      <el-progress :percentage="progress" :status="status === 'failed' ? 'exception' : undefined" />
-      <ul class="events">
-        <li v-for="event in events" :key="event.id">
-          <span class="seq">#{{ event.sequence }}</span>
-          <span class="stage">{{ event.stage ?? '-' }}</span>
-          <span class="state">{{ event.status ?? '' }}</span>
-          <span class="msg">{{ event.message ?? event.reason_code ?? '' }}</span>
-        </li>
-      </ul>
-    </section>
+        <div v-if="artifactUrl" class="artifact">
+          <span class="artifact-label">产物已封装</span>
+          <a class="download" :href="artifactUrl">下载加固产物</a>
+          <p class="artifact-note">split/AAB 任务为 ZIP 集合，单 APK 为安装包。</p>
+        </div>
 
-    <section class="card">
-      <div class="meta">
-        <span>安全事件</span>
-        <el-select
-          v-model="eventKind"
-          size="small"
-          style="width: 150px"
-          clearable
-          placeholder="全部类型"
-          @change="loadSecurityEvents"
-        >
-          <el-option v-for="kind in knownKinds" :key="kind" :label="kind" :value="kind" />
-        </el-select>
-        <el-button size="small" @click="loadSecurityEvents">刷新</el-button>
-      </div>
-      <el-table :data="securityEvents" size="small" empty-text="暂无事件">
-        <el-table-column prop="created_at" label="时间" width="210" />
-        <el-table-column prop="app_package" label="应用" min-width="160" />
-        <el-table-column prop="kind" label="类型" width="110" />
-        <el-table-column prop="rule_id" label="规则" width="140" />
-        <el-table-column prop="confidence" label="置信度" width="90" />
-      </el-table>
-    </section>
-  </main>
+        <div class="ledger-wrap">
+          <p class="rail-label">事件账本</p>
+          <ol v-if="recentEvents.length" class="ledger">
+            <li v-for="event in recentEvents" :key="event.id">
+              <span class="ledger-seq">#{{ event.sequence }}</span>
+              <span class="ledger-stage">{{ event.stage ?? 'pipeline' }}</span>
+              <span class="ledger-msg">{{ event.message ?? event.reason_code ?? event.status }}</span>
+            </li>
+          </ol>
+          <p v-else class="rail-empty">任务开始后，阶段与进度会在这里逐条出现。</p>
+        </div>
+      </aside>
+
+      <section class="stage">
+        <div class="hero">
+          <h2>新建加固任务</h2>
+          <p>上传主包与拆分资源，选择保护层和运行时策略；任务会进入构建队列并产出可验证的受保护安装包。</p>
+        </div>
+
+        <form @submit.prevent="upload">
+          <section class="block">
+            <div class="block-head">
+              <h3>输入与交付形态</h3>
+              <p>主包是 APK 或 AAB。APK 可附加已有 split；AAB split 模式使用 device spec 生成分设备产物。</p>
+            </div>
+
+            <div class="dropgrid">
+              <label
+                class="drop"
+                :class="{ active: dragging.source, filled: !!file }"
+                @dragover.prevent="dragging.source = true"
+                @dragleave.prevent="dragging.source = false"
+                @drop="onDrop('source', $event)"
+              >
+                <input type="file" accept=".apk,.aab" @change="onFileChange" />
+                <span class="drop-kicker">主包</span>
+                <strong class="drop-title">{{ sourceName || '拖入 APK / AAB' }}</strong>
+                <span class="drop-note">{{ file ? '点击可更换主包' : '或点击选择文件' }}</span>
+              </label>
+
+              <label
+                class="drop"
+                :class="{ active: dragging.splits, filled: splits.length > 0, disabled: sourceIsAab }"
+                @dragover.prevent="!sourceIsAab && (dragging.splits = true)"
+                @dragleave.prevent="dragging.splits = false"
+                @drop="onDrop('splits', $event)"
+              >
+                <input
+                  type="file"
+                  accept=".apk"
+                  multiple
+                  :disabled="sourceIsAab"
+                  @change="onSplitsChange"
+                />
+                <span class="drop-kicker">Split APK</span>
+                <strong class="drop-title">{{ splits.length ? `${splits.length} 个附加包` : '可选的 config / feature split' }}</strong>
+                <span class="drop-note">{{ sourceIsAab ? 'AAB 输入不使用 Split APK' : '拖入或点击选择多个文件' }}</span>
+              </label>
+
+              <label
+                class="drop"
+                :class="{ active: dragging.specs, filled: deviceSpecs.length > 0, disabled: aabMode !== 'split' }"
+                @dragover.prevent="aabMode === 'split' && (dragging.specs = true)"
+                @dragleave.prevent="dragging.specs = false"
+                @drop="onDrop('specs', $event)"
+              >
+                <input
+                  type="file"
+                  accept=".json"
+                  multiple
+                  :disabled="aabMode !== 'split'"
+                  @change="onSpecsChange"
+                />
+                <span class="drop-kicker">Device spec</span>
+                <strong class="drop-title">{{ deviceSpecs.length ? `${deviceSpecs.length} 个设备规格` : 'AAB split 的设备规格' }}</strong>
+                <span class="drop-note">{{ aabMode === 'split' ? '拖入或点击选择 JSON' : '先选择 AAB split 模式' }}</span>
+              </label>
+            </div>
+
+            <div class="field-grid">
+              <label class="field">
+                <span>应用 profile</span>
+                <select v-model="profile">
+                  <option value="basic">basic</option>
+                  <option value="enhanced">enhanced</option>
+                  <option value="financial">financial</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>签名方式</span>
+                <select v-model="signingMode">
+                  <option value="customer_local">客户本地签名</option>
+                  <option value="hsm">平台 HSM</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>AAB 拆分方式</span>
+                <select v-model="aabMode">
+                  <option value="universal">universal</option>
+                  <option value="split">split · 按设备规格</option>
+                </select>
+              </label>
+            </div>
+          </section>
+
+          <section class="block">
+            <div class="block-head">
+              <h3>保护层</h3>
+              <p>选择壳的静态变换、运行时检测和 native 库加载方式。关闭某个保护层会直接反映到注入配置。</p>
+            </div>
+
+            <div class="matrix">
+              <label class="toggle">
+                <input v-model="selfDecryptCore" type="checkbox" />
+                <span class="toggle-box"></span>
+                <span class="toggle-copy">
+                  <strong>Core 自解密</strong>
+                  <small>运行时恢复加密核心库</small>
+                </span>
+              </label>
+              <label class="toggle">
+                <input v-model="decoyDynamic" type="checkbox" />
+                <span class="toggle-box"></span>
+                <span class="toggle-copy">
+                  <strong>双 PT_DYNAMIC 诱饵</strong>
+                  <small>保留伪动态表，扰动静态还原</small>
+                </span>
+              </label>
+              <label class="toggle">
+                <input v-model="corruptSectionNames" type="checkbox" />
+                <span class="toggle-box"></span>
+                <span class="toggle-copy">
+                  <strong>破坏 section 名表</strong>
+                  <small>移除 ELF section 名可读性</small>
+                </span>
+              </label>
+              <label class="toggle">
+                <input v-model="selfDecryptText" type="checkbox" />
+                <span class="toggle-box"></span>
+                <span class="toggle-copy">
+                  <strong>Text 段自解密</strong>
+                  <small>壳库文本段构建期压缩加密</small>
+                </span>
+              </label>
+              <label class="toggle">
+                <input v-model="detection" type="checkbox" />
+                <span class="toggle-box"></span>
+                <span class="toggle-copy">
+                  <strong>运行时检测</strong>
+                  <small>启用环境、注入和规则扫描</small>
+                </span>
+              </label>
+              <label class="toggle">
+                <input v-model="embeddedKey" type="checkbox" />
+                <span class="toggle-box"></span>
+                <span class="toggle-copy">
+                  <strong>内置内容密钥</strong>
+                  <small>关闭后由授权服务在线取钥</small>
+                </span>
+              </label>
+            </div>
+
+            <div class="field-grid">
+              <label class="field wide">
+                <span>内存加载库</span>
+                <input v-model="inMemoryLibs" type="text" placeholder="libfoo.so, libbar.so" />
+                <small>逗号分隔；这些 so 会从 APK 移除并加密到 assets。</small>
+              </label>
+              <label class="field">
+                <span>清单签名算法</span>
+                <select v-model="alg">
+                  <option value="ecdsa-p256-sha256">ECDSA P-256</option>
+                  <option value="ed25519">Ed25519</option>
+                </select>
+              </label>
+            </div>
+          </section>
+
+          <section class="block">
+            <div class="block-head">
+              <h3>运行时通道</h3>
+              <p>授权与事件服务、响应模式、native 文件上限和壳版本。空白 URL 会回退 worker 的环境默认值。</p>
+            </div>
+
+            <div class="field-grid">
+              <label class="field">
+                <span>响应模式</span>
+                <select v-model="responseMode">
+                  <option value="log">log · 仅记录</option>
+                  <option value="toast">toast · 提示</option>
+                  <option value="degrade">degrade · 限制写入</option>
+                  <option value="block">block · 阻断受保护路径</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>单文件 native 上限</span>
+                <div class="number-wrap">
+                  <input v-model.number="maxNativeFileMb" type="number" min="1" max="4096" />
+                  <span>MB</span>
+                </div>
+              </label>
+              <label class="field">
+                <span>Shell 版本</span>
+                <input v-model="shellVersion" type="text" />
+              </label>
+              <label class="field wide">
+                <span>授权服务 URL</span>
+                <input v-model="authUrl" type="url" placeholder="https://auth.example" />
+              </label>
+              <label class="field wide">
+                <span>事件服务 URL</span>
+                <input v-model="eventUrl" type="url" placeholder="https://events.example" />
+              </label>
+              <label class="field">
+                <span>事件 Token</span>
+                <input v-model="eventToken" type="password" autocomplete="off" />
+              </label>
+            </div>
+          </section>
+
+          <div class="actions">
+            <button class="primary" type="submit" :disabled="busy">
+              {{ busy ? '构建中…' : '开始加固' }}
+            </button>
+            <button v-if="busy" class="secondary" type="button" @click="cancel">取消任务</button>
+            <a v-if="artifactUrl" class="secondary download-inline" :href="artifactUrl">
+              下载加固产物
+            </a>
+            <span class="action-note">产物仅在授权环境中分发。</span>
+          </div>
+          <p v-if="error" class="error" role="alert">{{ error }}</p>
+        </form>
+
+        <section class="block events-block">
+          <div class="block-head events-head">
+            <div>
+              <h3>安全事件</h3>
+              <p>已上报的规则命中与运行时检测记录。</p>
+            </div>
+            <div class="event-tools">
+              <select v-model="eventKind" @change="loadSecurityEvents">
+                <option value="">全部类型</option>
+                <option v-for="kind in knownKinds" :key="kind" :value="kind">{{ kind }}</option>
+              </select>
+              <button class="quiet" type="button" @click="loadSecurityEvents">刷新</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>应用</th>
+                  <th>类型</th>
+                  <th>规则</th>
+                  <th class="num">置信度</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in securityEvents" :key="item.id">
+                  <td class="mono">{{ item.created_at }}</td>
+                  <td>{{ item.app_package }}</td>
+                  <td><span class="tag">{{ item.kind }}</span></td>
+                  <td class="mono">{{ item.rule_id || '—' }}</td>
+                  <td class="num mono">{{ item.confidence.toFixed(2) }}</td>
+                </tr>
+                <tr v-if="securityEvents.length === 0">
+                  <td colspan="5" class="empty">暂无安全事件</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
 </template>
 
 <style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
 :root {
-  color-scheme: light dark;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color-scheme: light;
+  --shell: #d8ddd9;
+  --surface: #eef1ec;
+  --surface-raised: #f6f7f2;
+  --ink: #16211f;
+  --ink-soft: #4b5853;
+  --rule: #a9b3ac;
+  --rule-dark: #7f8c85;
+  --oxide: #b0472f;
+  --oxide-dark: #85311f;
+  --patina: #24685a;
+  --brass: #9a7540;
+  --rail: #17211f;
+  --rail-soft: #27332f;
+  --rail-ink: #dce4df;
+  --font: 'IBM Plex Sans', 'Avenir Next', 'Segoe UI', sans-serif;
+  --mono: 'IBM Plex Mono', 'SFMono-Regular', Menlo, monospace;
+  font-family: var(--font);
+  background: var(--shell);
+  color: var(--ink);
 }
-body {
-  margin: 0;
-  background: #f6f7f9;
-  color: #1f2328;
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--shell); }
+button, input, select { font: inherit; }
+button, a { -webkit-tap-highlight-color: transparent; }
+
+.app {
+  min-height: 100vh;
+  background:
+    radial-gradient(900px 520px at 92% -8%, rgb(176 71 47 / 10%), transparent 60%),
+    linear-gradient(90deg, transparent 49.85%, rgb(22 33 31 / 5%) 50%, transparent 50.15%),
+    var(--shell);
 }
-.page {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 48px 20px 80px;
-}
-header h1 {
-  margin: 0;
-  font-size: 28px;
-  letter-spacing: -0.02em;
-}
-.subtitle {
-  margin: 6px 0 28px;
-  color: #6a737d;
-}
-.card {
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 20px;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 4%);
-}
-.row {
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  height: 68px;
+  padding: 0 30px;
   display: flex;
   align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 14px;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--ink);
+  background: rgb(238 241 236 / 88%);
+  backdrop-filter: blur(12px);
 }
-.label {
-  color: #57606a;
-  font-size: 13px;
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand-mark { width: 34px; height: 34px; fill: var(--ink); }
+.brand-mark .mirror { fill: var(--oxide); opacity: 0.9; }
+.brand-mark .rule { fill: none; stroke: var(--ink); stroke-width: 1.4; }
+.brand-text { display: flex; align-items: baseline; gap: 12px; }
+.brand-name { font-size: 18px; font-weight: 700; letter-spacing: -0.03em; }
+.brand-sub { font-size: 11px; color: var(--ink-soft); }
+.topbar-meta {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; color: var(--ink-soft);
 }
-.hint {
-  color: #9aa4af;
-  font-size: 12px;
+.signal {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--patina); box-shadow: 0 0 0 3px rgb(36 104 90 / 14%);
 }
-.advanced {
-  margin: 8px 0 16px;
-}
-.grid {
+.slash { color: var(--rule-dark); }
+.mono { font-family: var(--mono); }
+
+.workspace {
+  max-width: 1440px;
+  margin: 0 auto;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 14px 18px;
+  grid-template-columns: 306px minmax(0, 1fr);
+  align-items: start;
+  background: linear-gradient(90deg, var(--rail) 0 306px, transparent 306px);
 }
-.field {
+.rail {
+  position: sticky;
+  top: 68px;
+  height: calc(100vh - 68px);
+  overflow: auto;
+  padding: 30px 24px 40px;
+  background: transparent;
+  color: var(--rail-ink);
+  border-right: 1px solid var(--ink);
+}
+.rail-label {
+  margin: 0 0 10px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: #93a29b;
+}
+.rail-title { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.03em; }
+.rail-id {
+  margin: 7px 0 22px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: #8b9a93;
+  word-break: break-all;
+}
+.summary { margin: 22px 0 24px; padding: 0; }
+.summary div {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: 10px;
+  padding: 9px 0;
+  border-top: 1px solid rgb(220 228 223 / 13%);
+}
+.summary div:last-child { border-bottom: 1px solid rgb(220 228 223 / 13%); }
+.summary dt { color: #8b9a93; font-size: 11px; }
+.summary dd {
+  margin: 0; font-size: 12px; color: var(--rail-ink);
+  text-align: right; overflow-wrap: anywhere;
+}
+.rail-status { margin: 22px 0 26px; }
+.status-line { display: flex; align-items: center; gap: 9px; font-size: 12px; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: #718079; }
+.status-dot.live { background: var(--brass); box-shadow: 0 0 0 4px rgb(154 117 64 / 17%); }
+.status-dot.ok { background: #78b9a8; }
+.status-dot.bad { background: #d2765e; }
+.status-percent { margin-left: auto; color: #93a29b; font-size: 10px; }
+.meter { height: 4px; margin-top: 10px; background: rgb(220 228 223 / 13%); overflow: hidden; }
+.meter span { display: block; height: 100%; background: var(--brass); transition: width 240ms ease; }
+.artifact { margin: 24px 0; padding: 14px; border: 1px solid rgb(220 228 223 / 22%); }
+.artifact-label { display: block; font-family: var(--mono); font-size: 10px; color: #93a29b; }
+.download {
+  display: block; margin-top: 8px; color: #f4c7a8;
+  font-size: 14px; font-weight: 600; text-decoration: none;
+}
+.download:hover { color: #fff1e4; }
+.artifact-note { margin: 8px 0 0; color: #8b9a93; font-size: 10px; line-height: 1.45; }
+.ledger-wrap { margin-top: 28px; }
+.ledger { list-style: none; margin: 0; padding: 0; }
+.ledger li {
+  display: grid;
+  grid-template-columns: 34px 62px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid rgb(220 228 223 / 10%);
+  font-size: 10px;
+  line-height: 1.45;
+}
+.ledger-seq { font-family: var(--mono); color: #718079; }
+.ledger-stage { color: #d2b184; font-family: var(--mono); }
+.ledger-msg { color: #aab8b1; overflow-wrap: anywhere; }
+.rail-empty { margin: 0; color: #718079; font-size: 11px; line-height: 1.6; }
+
+.stage { padding: 36px 42px 80px; min-width: 0; }
+.hero { max-width: 720px; margin-bottom: 32px; }
+.hero h2 {
+  margin: 0 0 10px;
+  font-size: clamp(34px, 4.2vw, 56px);
+  line-height: 0.98;
+  letter-spacing: -0.045em;
+  font-weight: 600;
+}
+.hero p { margin: 0; max-width: 62ch; color: var(--ink-soft); font-size: 14px; line-height: 1.7; }
+.block {
+  padding: 26px 0 34px;
+  border-top: 2px solid var(--ink);
+}
+.block-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 30px; margin-bottom: 22px; }
+.block-head h3 { margin: 0; font-size: 20px; letter-spacing: -0.03em; font-weight: 600; }
+.block-head p { max-width: 58ch; margin: 0; color: var(--ink-soft); font-size: 12px; line-height: 1.65; }
+.dropgrid { display: grid; grid-template-columns: 1.15fr 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+.drop {
+  position: relative;
+  min-height: 118px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
+  padding: 15px 16px;
+  background: rgb(246 247 242 / 55%);
+  border: 1px dashed var(--rule-dark);
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
 }
-.toggles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 18px;
-  margin-top: 16px;
+.drop:hover, .drop:focus-within { border-color: var(--ink); background: var(--surface-raised); }
+.drop.active { border-color: var(--oxide); background: rgb(176 71 47 / 6%); }
+.drop.filled { border-style: solid; border-color: var(--patina); }
+.drop.disabled { opacity: 0.48; cursor: not-allowed; }
+.drop input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.drop.disabled input { cursor: not-allowed; }
+.drop-kicker { font-family: var(--mono); font-size: 10px; color: var(--ink-soft); }
+.drop-title { font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
+.drop-note { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--ink-soft); }
+
+.field-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 18px; }
+.field { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.field.wide { grid-column: span 2; }
+.field > span { color: var(--ink-soft); font-size: 11px; }
+.field small { color: var(--ink-soft); font-size: 10px; line-height: 1.45; }
+.field input, .field select, .event-tools select {
+  width: 100%;
+  height: 40px;
+  padding: 0 11px;
+  color: var(--ink);
+  background: var(--surface-raised);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  outline: none;
 }
-.actions {
-  margin-top: 16px;
+.field select, .event-tools select {
+  appearance: none;
+  padding-right: 30px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink-soft) 50%), linear-gradient(135deg, var(--ink-soft) 50%, transparent 50%);
+  background-position: calc(100% - 15px) 17px, calc(100% - 10px) 17px;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
 }
-.meta {
-  display: flex;
-  gap: 24px;
-  margin-bottom: 12px;
-  font-size: 13px;
-  color: #57606a;
-  word-break: break-all;
+.field input:focus, .field select:focus, .event-tools select:focus {
+  border-color: var(--oxide);
+  box-shadow: 0 0 0 2px rgb(176 71 47 / 14%);
 }
-.events {
-  list-style: none;
-  margin: 16px 0 0;
-  padding: 0;
-  font-size: 13px;
+.number-wrap { display: flex; align-items: center; gap: 8px; }
+.number-wrap input { flex: 1; }
+.number-wrap span { color: var(--ink-soft); font-family: var(--mono); font-size: 11px; }
+
+.matrix { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 20px; }
+.toggle {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 11px;
+  min-height: 66px;
+  padding: 12px;
+  border: 1px solid var(--rule);
+  background: rgb(246 247 242 / 42%);
+  cursor: pointer;
 }
-.events li {
-  display: flex;
-  gap: 12px;
-  padding: 6px 0;
-  border-bottom: 1px dashed #eef0f2;
+.toggle:hover { border-color: var(--rule-dark); background: var(--surface-raised); }
+.toggle input { position: absolute; opacity: 0; pointer-events: none; }
+.toggle-box {
+  width: 18px; height: 18px; margin-top: 2px;
+  border: 1px solid var(--rule-dark); background: transparent;
+  position: relative;
 }
-.seq {
-  color: #9aa4af;
-  min-width: 28px;
+.toggle input:checked + .toggle-box { background: var(--patina); border-color: var(--patina); }
+.toggle input:checked + .toggle-box::after {
+  content: "";
+  position: absolute; left: 5px; top: 1px;
+  width: 4px; height: 9px;
+  border: solid #f2f5ef; border-width: 0 2px 2px 0;
+  transform: rotate(42deg);
 }
-.stage {
-  min-width: 70px;
-  color: #0969da;
+.toggle input:focus-visible + .toggle-box { outline: 2px solid var(--oxide); outline-offset: 3px; }
+.toggle-copy { display: flex; flex-direction: column; gap: 4px; }
+.toggle-copy strong { font-size: 12px; font-weight: 600; }
+.toggle-copy small { color: var(--ink-soft); font-size: 10px; line-height: 1.45; }
+
+.actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding-top: 26px; border-top: 2px solid var(--ink); }
+.primary, .secondary, .quiet {
+  border-radius: 2px; cursor: pointer; text-decoration: none; text-align: center;
 }
-.state {
-  min-width: 80px;
-  color: #1a7f37;
+.primary {
+  min-width: 150px; height: 44px; padding: 0 22px;
+  color: #fff4ea; background: var(--oxide); border: 1px solid var(--oxide-dark);
+  box-shadow: 3px 3px 0 var(--ink);
+  font-weight: 600; font-size: 13px;
+  transition: transform 100ms ease, box-shadow 100ms ease;
 }
-.msg {
-  color: #57606a;
-  word-break: break-all;
+.primary:hover:not(:disabled) { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--ink); }
+.primary:active:not(:disabled) { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
+.primary:disabled { opacity: 0.55; cursor: wait; }
+.secondary {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 42px; padding: 0 16px;
+  color: var(--ink); background: transparent; border: 1px solid var(--ink);
+  font-size: 12px;
 }
-@media (prefers-color-scheme: dark) {
-  body {
-    background: #0d1117;
-    color: #e6edf3;
+.secondary:hover { background: var(--ink); color: var(--surface); }
+.action-note { color: var(--ink-soft); font-size: 11px; }
+.error {
+  margin: 14px 0 0; padding: 11px 13px;
+  border-left: 3px solid var(--oxide);
+  background: rgb(176 71 47 / 8%);
+  color: var(--oxide-dark); font-size: 12px;
+}
+.events-block { margin-top: 14px; }
+.events-head { align-items: center; }
+.event-tools { display: flex; gap: 8px; }
+.event-tools select { width: 150px; height: 34px; font-size: 11px; }
+.quiet { height: 34px; padding: 0 12px; background: transparent; border: 1px solid var(--rule); font-size: 11px; }
+.quiet:hover { border-color: var(--ink); }
+.table-wrap { max-height: 390px; overflow: auto; border-top: 1px solid var(--rule); }
+table { width: 100%; border-collapse: collapse; font-size: 11px; }
+th {
+  position: sticky; top: 0; z-index: 1;
+  padding: 9px 8px; text-align: left; font-weight: 500;
+  color: var(--ink-soft); background: var(--surface);
+  border-bottom: 1px solid var(--rule);
+}
+td { padding: 9px 8px; border-bottom: 1px solid rgb(169 179 172 / 45%); vertical-align: top; }
+td.num, th.num { text-align: right; }
+td.mono { font-family: var(--mono); font-size: 10px; color: var(--ink-soft); }
+.tag { display: inline-block; padding: 2px 6px; border: 1px solid var(--rule); font-family: var(--mono); font-size: 9px; }
+.empty { padding: 30px 8px; text-align: center; color: var(--ink-soft); }
+.download-inline { border-color: var(--patina); color: var(--patina); }
+
+@media (max-width: 1080px) {
+  .workspace { grid-template-columns: 1fr; background: none; }
+  .rail {
+    position: relative; top: 0; height: auto; overflow: visible;
+    background: var(--rail);
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0 28px;
+    border-right: 0; border-bottom: 1px solid var(--ink);
   }
-  .card {
-    background: #161b22;
-    border-color: #30363d;
-  }
-  .subtitle,
-  .label,
-  .meta,
-  .msg,
-  .hint {
-    color: #8b949e;
-  }
+  .rail > .rail-label:first-child, .rail-title, .rail-id { grid-column: 1 / -1; }
+  .summary { margin-top: 8px; }
+  .rail-status, .artifact, .ledger-wrap { grid-column: 1 / -1; }
+  .stage { padding: 32px 28px 64px; }
+}
+@media (max-width: 760px) {
+  .topbar { padding: 0 18px; }
+  .brand-sub { display: none; }
+  .topbar-meta { font-size: 10px; }
+  .rail { display: block; padding: 24px 20px; }
+  .stage { padding: 26px 18px 60px; }
+  .hero h2 { font-size: 38px; }
+  .dropgrid, .field-grid, .matrix { grid-template-columns: 1fr; }
+  .field.wide { grid-column: auto; }
+  .block-head { display: block; }
+  .block-head p { margin-top: 8px; }
+  .events-head { display: flex; align-items: flex-start; }
+  .event-tools { flex-direction: column; }
+  .actions { align-items: stretch; }
+  .primary, .secondary { width: 100%; }
+  .table-wrap { margin-right: -18px; margin-left: -18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
 }
 </style>
