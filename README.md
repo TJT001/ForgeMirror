@@ -1,6 +1,6 @@
 # 铸镜 ForgeMirror
 
-是我在 Android逆向过程中对一些商业加固的功能等价实现，用于防护和绕过手段研究
+是我在 Android 逆向过程中遇到的商业加固核心功能的等价实现，用来研究各种防护和绕过技术
 
 ## 项目结构
 
@@ -22,46 +22,55 @@
 
 ## 保护层（7 个核心功能）
 
-Web 界面与 CLI 均提供对应开关。
+前四层让静态分析拿不到完整信息，后三层让密钥和运行环境更难被直接定位。Web 界面与 CLI 均有对应开关。
 
-1. **Core 自解密**
+| 保护层 | 说明 |
+|---|---|
+| Core 自解密 | 核心 so 不在 APK 里明文存在，启动时才解密到内存 |
+| 双 PT_DYNAMIC 诱饵 | 动态链接表放一份精简假表，真表字节仍留在文件里 |
+| 破坏 section 名表 | 抹掉 ELF 段名字，静态工具看不到 `.text` 等提示 |
+| Text 段自解密 | 壳自己的代码段先压缩加密，启动时才解开执行 |
+| 运行时检测 | App 跑起来后检查环境、注入和规则，命中就记录或处置 |
+| 内置内容密钥 | 解密业务代码的钥匙随包分发，但按用途拆成多把 |
+| 白盒密钥库 | 钥匙不直接存，用白盒表包住，运行时在 native 里拆开 |
+
+1. **Core 自解密**：核心库以密文形式随包，运行时才解密加载。
    - 构建期把 `libshield_core.so` 用 HKDF(`FM/core/v1`) + AES-GCM 封装为 `assets/shield/core/<abi>.enc`，并从 APK 移除明文 core
    - 运行时按 ABI 选取加密 core，解密后写入 memfd
    - `android_dlopen_ext` + 自研 ELF loader 直接从 fd 映射，不落盘
    - 映射完成后关闭 fd；core 缺失时回退平台库并记录降级
-2. **双 PT_DYNAMIC 诱饵**
+2. **双 PT_DYNAMIC 诱饵**：动态链接信息给静态工具看假的，真表仍藏在文件里。
    - 追加精简伪动态表，仅保留 `DT_NEEDED`、`DT_SONAME`、`DT_STRTAB`、`DT_STRSZ`、`DT_NULL`
    - `PT_DYNAMIC` 与 `SHT_DYNAMIC` 同步指向伪表，原始动态表字节保留，形成真伪双表
    - 可叠加 section 名表破坏；按伪表还原会丢失符号与重定位信息
    - core 库不做该变换，保证自解密链路完整
-3. **破坏 section 名表**
+3. **破坏 section 名表**：ELF 段名字被抹掉，干扰静态工具分析。
    - 构建期覆写 ELF `shstrtab`，section 名不可读
    - 保留 program header、`.dynamic`、`.dynsym` / `.dynstr` 与重定位结构
    - 与双 PT_DYNAMIC 同开关生效，覆盖 boot / hook / yara 等壳库
    - 16 KB 页对齐与签名流程不变
-4. **Text 段自解密**
+4. **Text 段自解密**：壳的代码段平时是密文，运行到它时才解开执行。
    - 对 boot / hook / yara 的 `.text` 做 LZSS 压缩 + 32 字节密钥异或
    - 压缩密文追加到文件尾部，并重建 section header
    - `DT_INIT`（`fm_selfdecrypt_init`）在加载前解密并 `mprotect` 恢复执行权限
    - 逐库记录压缩前后大小；不支持的 ELF 自动跳过并告警
-5. **运行时检测**
+5. **运行时检测**：App 启动后持续检查是不是被 Root、注入或改包，并按策略处置。
    - 通用 `env_*` 规则 + 易盾来源的 `yidun_*` 签名
    - native YARA 扫描 DEX / ELF / 字符串 / 哈希，命中写入事件队列
    - PKR1 签名规则包，支持远程下发、版本门控与篡改拒绝
    - 响应模式 `log` / `toast` / `degrade` / `block`
    - 事件由主进程统一上报 API
-6. **内置内容密钥**
+6. **内置内容密钥**：解密业务代码的钥匙随包走，但拆成多个、各管一层。
    - 32 字节 `K_content` 随包分发；也可复用已有 key file 保证可复现构建
    - native vault 安装后按标签派生 policy / file / native / rules / core 密钥
    - 关闭“内置内容密钥”后改为授权服务在线取钥，根密钥只安装一次
    - 密钥资产纳入签名清单与产物校验
-7. **白盒密钥库**
+7. **白盒密钥库**：钥匙不裸存，先用白盒表包起来，运行时在 native 里拆。
    - 构建期生成 `WBK1` 包裹块（nonce + Chow 白盒 CTR keystream）
    - 保护时导出 `WBX1` 扁平表（约 1.2 MB），Java 白盒实现只留在构建工具
    - native C 实现白盒查表、HKDF、FDX2 AES-GCM 解密与逐文件 SHA-256 校验
    - 根密钥不回到 Java；Java 只持有派生密钥，用完清零
    - 表格式、长度与魔数严格校验，解包失败直接 fail-closed
-
 ## 实验性：语义诱饵用来反AI分析
 
 默认关闭，用于研究 AI/自动化分析噪音，不属于上面的 7 个核心保护层。
