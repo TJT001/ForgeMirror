@@ -64,6 +64,46 @@ class BatchCliTests(unittest.TestCase):
             self.assertEqual(
                 batch["device_specs"], [str(spec1), str(spec2)])
 
+    def test_page_alignment_failure_fails_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            apk = root / "base.apk"
+            apk.write_bytes(b"apk")
+            out = root / "out"
+
+            class PageTools:
+                def verify_page_alignment(self, path):
+                    return False, "unaligned"
+
+            def fake_build(options, tools):
+                work = Path(options.out)
+                work.mkdir(parents=True, exist_ok=True)
+                (work / "container.fdx").write_bytes(b"FDX2")
+                key_dir = work / "keys"
+                key_dir.mkdir()
+                (key_dir / "k_content.bin").write_bytes(b"k" * 32)
+                return {"ok": True, "out": str(work), "build_id": options.build_id,
+                        "apk": str(work / "base.apk"), "splits": []}
+
+            with mock.patch.object(cli, "_discover", return_value=PageTools()), \
+                    mock.patch.object(cli, "run_build", side_effect=fake_build), \
+                    mock.patch.object(cli, "protect",
+                                      return_value={"ok": True,
+                                                    "apk": str(out / "protected.apk"),
+                                                    "splits": []}), \
+                    mock.patch.object(cli, "run_gate",
+                                      return_value={"passed": True, "failed": [],
+                                                    "checks": []}):
+                result = CliRunner().invoke(cli.app, [
+                    "protect", "--apk", str(apk), "--out", str(out),
+                    "--signing-mode", "hsm",
+                ])
+            self.assertEqual(result.exit_code, 1)
+            gate = json.loads((out / "gate.json").read_text())
+            self.assertFalse(gate["passed"])
+            self.assertTrue(any("page_alignment_16k" in item
+                                for item in gate["failed"]))
+
     def test_build_creates_one_set_per_device_spec(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

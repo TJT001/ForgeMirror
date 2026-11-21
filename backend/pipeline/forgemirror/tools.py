@@ -178,6 +178,15 @@ class AndroidTools:
     def verify(self, apk: Path) -> str:
         return self._run([str(self.apksigner), "verify", "--print-certs", str(apk)])
 
+    def verify_page_alignment(self, apk: Path) -> tuple[bool, str]:
+        try:
+            self._run([
+                str(self.zipalign), "-c", "-P", "16", "-v", "4", str(apk)
+            ], timeout=120)
+            return True, "16 KB aligned"
+        except ToolError as error:
+            return False, str(error)
+
     def _java(self) -> str:
         java_home = os.environ.get("JAVA_HOME")
         if java_home:

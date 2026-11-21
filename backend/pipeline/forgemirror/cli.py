@@ -43,6 +43,27 @@ def _load_allowlist(path: Path | None) -> set[str] | None:
     return values
 
 
+def _attach_page_checks(gate: dict, tools, paths: list[Path]) -> dict:
+    verify = getattr(tools, "verify_page_alignment", None)
+    if verify is None:
+        return gate
+    failures: list[str] = []
+    for path in paths:
+        passed, detail = verify(path)
+        name = f"page_alignment_16k:{path.name}"
+        gate.setdefault("checks", []).append({
+            "name": name,
+            "status": "pass" if passed else "fail",
+            "detail": detail,
+        })
+        if not passed:
+            failures.append(name)
+    if failures:
+        gate["passed"] = False
+        gate.setdefault("failed", []).extend(failures)
+    return gate
+
+
 def _discover(sdk_root: Path | None, build_tools: str | None) -> AndroidTools:
     try:
         return AndroidTools.discover(sdk_root, build_tools)
@@ -304,6 +325,7 @@ def protect_apk(
                        for item in result.get("splits", [])]
         gate = run_gate(base_out, container, key_file.read_bytes(),
                         splits=split_paths)
+        gate = _attach_page_checks(gate, tools, [base_out, *split_paths])
         (work_dir / "gate.json").write_text(
             json.dumps(gate, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
         )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import struct
 import sys
 import tempfile
 import unittest
@@ -42,10 +43,22 @@ SPLIT_XML = """N: android=http://schemas.android.com/apk/res/android (line=2)
     A: http://schemas.android.com/apk/res/android:versionCode(0x0101021b)=7
 """
 DEX = b"dex\n035\x00" + b"\x00" * 64
-ELF_ARM64 = (
-    b"\x7fELF" + bytes([2, 1, 1, 0]) + b"\x00" * 8 + b"\x00\x00"
-    + (183).to_bytes(2, "little") + b"\x00" * 64
-)
+def elf_arm64(align: int = 0x1000) -> bytes:
+    header = bytearray(64)
+    header[:4] = b"\x7fELF"
+    header[4] = 2
+    header[5] = 1
+    struct.pack_into("<H", header, 18, 183)
+    struct.pack_into("<Q", header, 0x20, 64)
+    struct.pack_into("<H", header, 0x36, 56)
+    struct.pack_into("<H", header, 0x38, 1)
+    phdr = bytearray(56)
+    struct.pack_into("<I", phdr, 0, 1)
+    struct.pack_into("<Q", phdr, 48, align)
+    return bytes(header + phdr)
+
+
+ELF_ARM64 = elf_arm64(0x1000)
 
 
 class SplitTools:
@@ -295,6 +308,8 @@ class ProtectSplitTests(unittest.TestCase):
                 ), ProtectTools())
 
             self.assertEqual(result["split_count"], 1)
+            self.assertTrue(any("W_16KB_ALIGN" in item
+                                for item in result["warnings"]))
             with zipfile.ZipFile(tmp / "protected.apk") as archive:
                 names = set(archive.namelist())
                 self.assertIn("assets/shield/native/arm64-v8a/libdemo.so.enc", names)

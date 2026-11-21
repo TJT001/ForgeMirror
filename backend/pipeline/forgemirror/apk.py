@@ -205,6 +205,45 @@ def list_dex(apk: Path, source: str = "base") -> list[DexEntry]:
     return entries
 
 
+def elf_max_page_size(data: bytes) -> int | None:
+    if len(data) < 0x34 or data[:4] != b"\x7fELF":
+        return None
+    elf_class = data[4]
+    data_encoding = data[5]
+    if elf_class not in (1, 2) or data_encoding not in (1, 2):
+        return None
+    endian = "<" if data_encoding == 1 else ">"
+    try:
+        if elf_class == 2:
+            phoff = struct.unpack_from(endian + "Q", data, 0x20)[0]
+            phentsize = struct.unpack_from(endian + "H", data, 0x36)[0]
+            phnum = struct.unpack_from(endian + "H", data, 0x38)[0]
+            align_offset = 48
+        else:
+            phoff = struct.unpack_from(endian + "I", data, 0x1C)[0]
+            phentsize = struct.unpack_from(endian + "H", data, 0x2A)[0]
+            phnum = struct.unpack_from(endian + "H", data, 0x2C)[0]
+            align_offset = 28
+        maximum = 0
+        for index in range(phnum):
+            position = phoff + index * phentsize
+            width = 8 if elf_class == 2 else 4
+            if position + align_offset + width > len(data):
+                return None
+            if struct.unpack_from(endian + "I", data, position)[0] != 1:
+                continue
+            if elf_class == 2:
+                value = struct.unpack_from(endian + "Q", data,
+                                           position + align_offset)[0]
+            else:
+                value = struct.unpack_from(endian + "I", data,
+                                           position + align_offset)[0]
+            maximum = max(maximum, value)
+        return maximum or None
+    except struct.error:
+        return None
+
+
 def elf_arch(prefix: bytes) -> str | None:
     if len(prefix) < 20 or prefix[:4] != b"\x7fELF":
         return None

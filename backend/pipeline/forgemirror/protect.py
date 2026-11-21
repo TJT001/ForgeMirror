@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from uuid import UUID
 from pathlib import Path
 
-from .apk import elf_arch, parse_badging, sha256_file
+from .apk import elf_arch, elf_max_page_size, parse_badging, sha256_file
 from .formats import axml
 from .formats.elf import ElfError, add_dynamic_decoy
 from .formats.selfdecrypt import add_dt_init_lzss
@@ -190,6 +190,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
         raise SystemExit("duplicate split names")
 
     sources = [options.apk, *options.splits]
+    alignment_warnings: list[str] = []
     for source in sources:
         with zipfile.ZipFile(source) as archive:
             for info in archive.infolist():
@@ -199,11 +200,18 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
                 if len(parts) < 3:
                     continue
                 expected = "armeabi-v7a" if parts[1] == "armeabi" else parts[1]
-                arch = elf_arch(archive.read(info.filename)[:20])
+                payload = archive.read(info.filename)
+                arch = elf_arch(payload[:20])
                 if arch != expected:
                     raise SystemExit(
                         f"ABI mismatch in {info.filename}: ELF {arch} != dir {expected}"
                     )
+                if payload[4:5] == b"\x02":
+                    align = elf_max_page_size(payload)
+                    if align is not None and align < 0x4000:
+                        alignment_warnings.append(
+                            f"W_16KB_ALIGN: {info.filename} max-page-size=0x{align:x}"
+                        )
     with zipfile.ZipFile(options.apk) as archive:
         original_manifest = archive.read("AndroidManifest.xml")
     document = axml.parse(original_manifest)
@@ -244,7 +252,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
     policy_alg = "ecdsa-p256-sha256-raw" if options.alg == "ecdsa-p256-sha256" else options.alg
 
     options.out.parent.mkdir(parents=True, exist_ok=True)
-    warnings: list[str] = []
+    warnings: list[str] = list(alignment_warnings)
     if raised_min_sdk is not None and raised_min_sdk < 26:
         warnings.append(
             f"minSdkVersion raised {raised_min_sdk} -> 26 (in-memory DEX loading)"
