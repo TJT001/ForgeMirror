@@ -18,7 +18,7 @@
 - 检测：通用 `env_*` 规则 + 易盾来源的 `yidun_*` 规则；签名特征可随 PKR1 下发并在下次进程启动生效，已实测 v2→v3→v4 远程更新、篡改拒绝和版本门控。
 - 后端：Go API、PostgreSQL、认证/事件/规则/配置接口已实现；PKR1 上传与版本门控可用。
 - 流水线：S0–S8、APK/AAB、universal/default split、多 device-spec 批量、容器/策略/规则/清单、16 KB 对齐与 S8 闸门均有测试覆盖。
-- 前端：基础目录骨架，上传/配置/任务/产物页面尚未接入后端。
+- 前端：上传/加固选项/任务进度/产物下载/安全事件页面已实现，已与 API/worker 联调。
 
 ## 技术选型
 
@@ -50,6 +50,7 @@ backend/pipeline/scripts/check.sh
 - [split APK / AAB](docs/evidence/2026-11-21-P2-split-aab.md)
 - [自研 loader 动态 TLS](docs/evidence/2026-11-21-P2-tls-relocation.md)
 - [x86_64 hook 与 API 37](docs/evidence/2026-11-14-P1-api37-hooks.md)
+- [前端加固选项](docs/evidence/2026-11-21-P2-ui-hardening-options.md)
 - [开发环境](docs/开发环境.md)
 - [依赖登记](docs/components.lock.json)
 

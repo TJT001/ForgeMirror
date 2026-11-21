@@ -118,6 +118,9 @@ class ProtectOptions:
     self_decrypt_text: bool = True
     in_memory_libs: str = ""
     splits: list[Path] = field(default_factory=list)
+    detection: bool = True
+    response: str = "toast"
+    max_native_file_mb: int = 128
 
 
 def _stub_from_aar(aar: Path, tools: AndroidTools, tmp: Path) -> tuple[bytes, dict[str, bytes]]:
@@ -430,11 +433,11 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             "auth_url": options.auth_url,
             "event_url": options.event_url,
             "event_token": options.event_token,
-            "detection": True,
-            "response": "toast",
+            "detection": options.detection,
+            "response": options.response,
             "rules_version": DEFAULT_RULES["version"],
             "cert_sha256": cert,
-            "max_native_file_mb": 128,
+            "max_native_file_mb": options.max_native_file_mb,
             "core": "shield/core" if core_assets else "",
             "app_id": package,
             "build_salt": secrets.token_hex(16),

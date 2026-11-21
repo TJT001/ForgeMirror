@@ -102,7 +102,6 @@ def build(
     if signing_mode not in SIGNING_MODES:
         typer.echo(f"invalid signing mode: {signing_mode}", err=True)
         raise typer.Exit(2)
-
     tools = _discover(sdk_root, build_tools)
     if device_spec and (apk.suffix.lower() != ".aab" or aab_mode != "split"):
         typer.echo("--device-spec requires .aab with --aab-mode split", err=True)
@@ -214,6 +213,12 @@ def protect_apk(
         "", "--in-memory-libs",
         help="Comma-separated customer .so basenames to load from encrypted assets.",
     ),
+    detection: bool = typer.Option(True, "--detection/--no-detection",
+                                   help="Enable runtime detection."),
+    response: str = typer.Option("toast", "--response",
+                                 help="Detection response: log, toast, degrade, block."),
+    max_native_file_mb: int = typer.Option(128, "--max-native-file-mb",
+                                           min=1, max=4096),
     key_dir: Path = typer.Option(Path("artifacts/keys"), "--key-dir"),
     content_key: Path | None = typer.Option(
         None, "--key-file", exists=True, dir_okay=False, readable=True,
@@ -239,6 +244,9 @@ def protect_apk(
         raise typer.Exit(2)
     if signing_mode not in SIGNING_MODES:
         typer.echo(f"invalid signing mode: {signing_mode}", err=True)
+        raise typer.Exit(2)
+    if response not in ("log", "toast", "degrade", "block"):
+        typer.echo(f"invalid response mode: {response}", err=True)
         raise typer.Exit(2)
 
     tools = _discover(sdk_root, build_tools)
@@ -319,6 +327,9 @@ def protect_apk(
                 corrupt_section_names=corrupt_section_names,
                 self_decrypt_text=self_decrypt_text,
                 in_memory_libs=in_memory_libs,
+                detection=detection,
+                response=response,
+                max_native_file_mb=max_native_file_mb,
                 alg=alg,
                 splits=effective_splits,
             ),

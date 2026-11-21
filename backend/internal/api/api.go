@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -87,11 +89,101 @@ func cors() gin.HandlerFunc {
 
 func (s *Server) createTask(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, s.cfg.MaxUploadBytes)
-	profile := c.DefaultPostForm("profile", "basic")
-	signingMode := c.DefaultPostForm("signing_mode", "customer_local")
-	fileHeader, err := c.FormFile("file")
+	form, err := c.MultipartForm()
 	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "multipart form required"})
+		return
+	}
+	profile := formValue(form, "profile", "basic")
+	signingMode := formValue(form, "signing_mode", "customer_local")
+	if !contains([]string{"basic", "enhanced", "financial"}, profile) ||
+		!contains([]string{"hsm", "customer_local"}, signingMode) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid profile or signing_mode"})
+		return
+	}
+
+	files := form.File["file"]
+	if len(files) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "file field required"})
+		return
+	}
+	fileHeader := files[0]
+	sourceExt := strings.ToLower(filepath.Ext(fileHeader.Filename))
+	if sourceExt != ".apk" && sourceExt != ".aab" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "only .apk or .aab input is supported"})
+		return
+	}
+	aabMode := formValue(form, "aab_mode", "universal")
+	if aabMode != "universal" && aabMode != "split" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "aab_mode must be universal or split"})
+		return
+	}
+	if sourceExt != ".aab" && aabMode != "universal" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "split mode requires .aab input"})
+		return
+	}
+	if sourceExt == ".aab" && aabMode == "split" && len(form.File["device_specs"]) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "split mode requires at least one device spec"})
+		return
+	}
+	if sourceExt == ".aab" && len(form.File["splits"]) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "splits cannot be combined with .aab input"})
+		return
+	}
+	if sourceExt != ".aab" && len(form.File["device_specs"]) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "device specs require .aab input"})
+		return
+	}
+	if aabMode != "split" && len(form.File["device_specs"]) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "device specs require split mode"})
+		return
+	}
+
+	boolOption := func(name string, fallback bool) (bool, error) {
+		value := formValue(form, name, "")
+		if value == "" {
+			return fallback, nil
+		}
+		return strconv.ParseBool(value)
+	}
+	options := map[string]any{
+		"auth_url":       formValue(form, "auth_url", ""),
+		"event_url":      formValue(form, "event_url", ""),
+		"event_token":    formValue(form, "event_token", ""),
+		"in_memory_libs": formValue(form, "in_memory_libs", ""),
+		"alg":            formValue(form, "alg", "ecdsa-p256-sha256"),
+		"shell_version":  formValue(form, "shell_version", "0.1.0"),
+		"response":       formValue(form, "response", "toast"),
+		"aab_mode":       aabMode,
+	}
+	for name, fallback := range map[string]bool{
+		"no_key_asset":          false,
+		"self_decrypt_core":     true,
+		"decoy_dynamic":         true,
+		"corrupt_section_names": true,
+		"self_decrypt_text":     true,
+		"detection":             true,
+	} {
+		value, err := boolOption(name, fallback)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid " + name})
+			return
+		}
+		options[name] = value
+	}
+	maxNative := formValue(form, "max_native_file_mb", "128")
+	parsedMax, err := strconv.Atoi(maxNative)
+	if err != nil || parsedMax < 1 || parsedMax > 4096 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "max_native_file_mb must be 1..4096"})
+		return
+	}
+	options["max_native_file_mb"] = parsedMax
+	if !contains([]string{"log", "toast", "degrade", "block"}, options["response"].(string)) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid response mode"})
+		return
+	}
+	if !contains([]string{"ecdsa-p256-sha256", "ed25519"}, options["alg"].(string)) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid alg"})
 		return
 	}
 
@@ -101,7 +193,7 @@ func (s *Server) createTask(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	target := filepath.Join(dir, "app.apk")
+	target := filepath.Join(dir, "source"+sourceExt)
 	absolute, err := filepath.Abs(target)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -111,18 +203,108 @@ func (s *Server) createTask(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	sum, size, err := hashFile(absolute)
+
+	splits, err := saveUploads(form.File["splits"], filepath.Join(dir, "splits"), ".apk")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	specs, err := saveUploads(form.File["device_specs"], filepath.Join(dir, "device_specs"), ".json")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if len(splits) > 0 {
+		options["splits"] = splits
+	}
+	if len(specs) > 0 {
+		for _, spec := range specs {
+			body, readErr := os.ReadFile(spec)
+			if readErr != nil || !json.Valid(body) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "device spec must be valid JSON"})
+				return
+			}
+		}
+		options["device_specs"] = specs
+	}
+	optionsJSON, err := json.Marshal(options)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	task, err := s.store.CreateTask(c.Request.Context(), id, absolute, sum, profile, signingMode)
+	sum, size, err := hashFile(absolute)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	task, err := s.store.CreateTask(c.Request.Context(), id, absolute, sum,
+		profile, signingMode, optionsJSON)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusAccepted, gin.H{"task": task, "size": size})
+}
+
+func formValue(form *multipart.Form, name, fallback string) string {
+	if values := form.Value[name]; len(values) > 0 {
+		value := strings.TrimSpace(values[0])
+		if value != "" {
+			return value
+		}
+	}
+	return fallback
+}
+
+func contains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func saveUploads(files []*multipart.FileHeader, dir, extension string) ([]string, error) {
+	var paths []string
+	if len(files) == 0 {
+		return paths, nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	for index, header := range files {
+		if strings.ToLower(filepath.Ext(header.Filename)) != extension {
+			return nil, fmt.Errorf("%s is not %s", header.Filename, extension)
+		}
+		name := fmt.Sprintf("%02d_%s", index, filepath.Base(header.Filename))
+		target := filepath.Join(dir, name)
+		if err := saveMultipartFile(header, target); err != nil {
+			return nil, err
+		}
+		absolute, err := filepath.Abs(target)
+		if err != nil {
+			return nil, err
+		}
+		paths = append(paths, absolute)
+	}
+	return paths, nil
+}
+
+func saveMultipartFile(header *multipart.FileHeader, target string) error {
+	source, err := header.Open()
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+	output, err := os.Create(target)
+	if err != nil {
+		return err
+	}
+	defer output.Close()
+	_, err = io.Copy(output, source)
+	return err
 }
 
 func (s *Server) getTask(c *gin.Context) {

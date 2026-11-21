@@ -29,6 +29,14 @@ go run ./cmd/api
 
 规则包上传后落在 `DATA_DIR/rules/<package>/<version>.pkr`；客户端通过 `GET /api/v1/rules/latest` 按版本门控拉取。
 
+## 加固任务参数
+
+`POST /api/v1/tasks` 为 multipart：`file`（.apk/.aab）、可选多个 `splits` 和
+`device_specs`，以及 profile、signing_mode、aab_mode、认证/事件、自解密、检测、
+响应、算法、内存库等加固选项。选项保存在 `tasks.options`，worker 负责拼
+`forgemirror.cli protect` 命令；split/AAB/多 device-spec 的产物打包为
+`protected-set.zip`，单 APK 直接返回 APK。
+
 ## 验证
 
 ```bash

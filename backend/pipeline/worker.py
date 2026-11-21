@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import zipfile
 import time
 from pathlib import Path
 
@@ -43,7 +44,8 @@ SET status = 'running',
     updated_at = now()
 FROM candidate c
 WHERE t.id = c.id
-RETURNING t.id, t.source_path, t.profile, t.signing_mode, t.attempt, t.max_attempts
+RETURNING t.id, t.source_path, t.profile, t.signing_mode, t.options,
+          t.attempt, t.max_attempts
 """
 
 
@@ -86,33 +88,160 @@ def heartbeat(conn: psycopg.Connection, task: dict) -> bool:
     return bool(row and row["canceled"])
 
 
-def run_pipeline(task: dict) -> tuple[bool, str | None, str | None, dict]:
+def _option(task: dict, key: str, fallback=None):
+    options = task.get("options") or {}
+    if isinstance(options, str):
+        try:
+            options = json.loads(options)
+        except json.JSONDecodeError:
+            options = {}
+    return options.get(key, fallback)
+
+
+def _env_or_option(task: dict, key: str, env_name: str) -> str:
+    options = task.get("options") or {}
+    if isinstance(options, str):
+        try:
+            options = json.loads(options)
+        except json.JSONDecodeError:
+            options = {}
+    if key in options and options.get(key):
+        return str(options.get(key))
+    return os.environ.get(env_name, "")
+
+
+def build_protect_command(task: dict) -> list[str]:
     work_dir = DATA_DIR / "works" / str(task["id"])
-    work_dir.mkdir(parents=True, exist_ok=True)
     shield_aar = os.environ.get(
         "SHIELD_AAR",
         str(ROOT / "android" / "shield" / "build" / "outputs" / "aar" / "shield-debug.aar"),
     )
+    source = task["source_path"]
     command = [
         sys.executable, "-m", "forgemirror.cli", "protect",
-        "--apk", task["source_path"],
+        "--apk", source,
         "--out", str(work_dir),
         "--profile", task["profile"],
         "--signing-mode", task["signing_mode"],
         "--build-id", str(task["id"]),
         "--shield-aar", shield_aar,
     ]
-    auth_url = os.environ.get("AUTH_URL", "")
+    auth_url = _env_or_option(task, "auth_url", "AUTH_URL")
     if auth_url:
         command.extend(["--auth-url", auth_url])
-    event_url = os.environ.get("EVENT_URL", "")
+    event_url = _env_or_option(task, "event_url", "EVENT_URL")
     if event_url:
         command.extend(["--event-url", event_url])
-    event_token = os.environ.get("EVENT_TOKEN", "")
+    event_token = _env_or_option(task, "event_token", "EVENT_TOKEN")
     if event_token:
         command.extend(["--event-token", event_token])
-    if os.environ.get("NO_KEY_ASSET", "").lower() in ("1", "true", "yes"):
+    if _option(task, "no_key_asset", False):
         command.append("--no-key-asset")
+    if _option(task, "self_decrypt_core", True) is False:
+        command.append("--no-self-decrypt-core")
+    if _option(task, "decoy_dynamic", True) is False:
+        command.append("--no-decoy-dynamic")
+    if _option(task, "corrupt_section_names", True) is False:
+        command.append("--keep-section-names")
+    if _option(task, "self_decrypt_text", True) is False:
+        command.append("--no-self-decrypt-text")
+    if _option(task, "detection", True) is False:
+        command.append("--no-detection")
+    response = _option(task, "response")
+    if response:
+        command.extend(["--response", str(response)])
+    max_native = _option(task, "max_native_file_mb")
+    if max_native is not None:
+        command.extend(["--max-native-file-mb", str(max_native)])
+    in_memory = _option(task, "in_memory_libs")
+    if in_memory:
+        command.extend(["--in-memory-libs", str(in_memory)])
+    alg = _option(task, "alg")
+    if alg:
+        command.extend(["--alg", str(alg)])
+    shell_version = _option(task, "shell_version")
+    if shell_version:
+        command.extend(["--shell-version", str(shell_version)])
+    aab_mode = _option(task, "aab_mode")
+    if aab_mode:
+        command.extend(["--aab-mode", str(aab_mode)])
+    for split in _option(task, "splits", []) or []:
+        command.extend(["--split", str(split)])
+    for spec in _option(task, "device_specs", []) or []:
+        command.extend(["--device-spec", str(spec)])
+    return command
+
+
+def _read_json(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def package_result(work_dir: Path) -> tuple[Path | None, str | None, int | None, bool]:
+    batch = _read_json(work_dir / "batch.json")
+    sets = batch.get("sets") if isinstance(batch.get("sets"), list) else []
+    if sets:
+        archive = work_dir / "protected-set.zip"
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+            bundle.write(work_dir / "batch.json", "batch.json")
+            for index, item in enumerate(sets):
+                set_dir = Path(str(item.get("out", "")))
+                if not set_dir.is_dir():
+                    continue
+                for name in ("protected.apk", "protected.apk.splits.json",
+                             "protected.protect.json", "gate.json"):
+                    path = set_dir / name
+                    if path.is_file():
+                        bundle.write(path, f"sets/{index:02d}/{name}")
+                split_dir = set_dir / "protected_splits"
+                if split_dir.is_dir():
+                    for split in sorted(split_dir.glob("*.apk")):
+                        bundle.write(split, f"sets/{index:02d}/splits/{split.name}")
+        first = {}
+        for item in sets:
+            first = _read_json(Path(str(item.get("out", ""))) / "protected.protect.json")
+            if first:
+                break
+        return (archive, first.get("package"), first.get("version_code"),
+                bool(batch.get("ok")))
+
+    protected = work_dir / "protected.apk"
+    if not protected.is_file():
+        return None, None, None, False
+    meta = _read_json(work_dir / "protected.protect.json")
+    gate = _read_json(work_dir / "gate.json")
+    if (work_dir / "protected.apk.splits.json").is_file() or             (work_dir / "protected_splits").is_dir():
+        archive = work_dir / "protected-set.zip"
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+            for name in ("protected.apk", "protected.apk.splits.json",
+                         "protected.protect.json", "gate.json"):
+                path = work_dir / name
+                if path.is_file():
+                    bundle.write(path, name)
+            split_dir = work_dir / "protected_splits"
+            if split_dir.is_dir():
+                for split in sorted(split_dir.glob("*.apk")):
+                    bundle.write(split, f"protected_splits/{split.name}")
+        return (archive, meta.get("package"), meta.get("version_code"),
+                bool(gate.get("passed")))
+    return (protected, meta.get("package"), meta.get("version_code"),
+            bool(gate.get("passed")))
+
+
+def run_pipeline(task: dict) -> tuple[bool, str | None, str | None, dict]:
+    work_dir = DATA_DIR / "works" / str(task["id"])
+    work_dir.mkdir(parents=True, exist_ok=True)
+    command = build_protect_command(task)
     env = dict(os.environ)
     env["PYTHONPATH"] = str(PIPELINE)
     process = subprocess.Popen(
@@ -133,36 +262,22 @@ def run_pipeline(task: dict) -> tuple[bool, str | None, str | None, dict]:
             last_heartbeat = time.time()
     stdout, stderr = process.communicate()
 
-    summary: dict = {}
-    protected = work_dir / "protected.apk"
-    protect_meta_path = work_dir / "protected.protect.json"
-    if protect_meta_path.is_file():
-        try:
-            meta = json.loads(protect_meta_path.read_text())
-            summary = {
-                "package": meta.get("package"),
-                "version_code": meta.get("version_code"),
-                "result": str(protected),
-                "sha256": hashlib.sha256(protected.read_bytes()).hexdigest()
-                if protected.is_file() else None,
-            }
-        except Exception:
-            summary = {}
+    result, package, version_code, gate_passed = package_result(work_dir)
+    summary = {
+        "package": package,
+        "version_code": version_code,
+        "result": str(result) if result is not None else None,
+        "sha256": _sha256(result) if result is not None else None,
+        "result_kind": "zip" if result is not None and result.suffix == ".zip" else "apk"
+        if result is not None else None,
+    }
 
-    gate_path = work_dir / "gate.json"
-    gate_passed = False
-    if gate_path.is_file():
-        try:
-            gate_passed = bool(json.loads(gate_path.read_text()).get("passed"))
-        except Exception:
-            gate_passed = False
-
-    if process.returncode != 0 or not protected.is_file() or not gate_passed:
-        reason = "E_GATE" if gate_path.is_file() and not gate_passed else "E_PIPELINE"
+    if process.returncode != 0 or result is None or not gate_passed:
+        reason = "E_GATE" if result is not None and not gate_passed else "E_PIPELINE"
         intake_path = work_dir / "intake.json"
         if reason == "E_PIPELINE" and intake_path.is_file():
             try:
-                codes = json.loads(intake_path.read_text()).get("reason_codes") or []
+                codes = _read_json(intake_path).get("reason_codes") or []
                 if codes:
                     reason = codes[0]
             except Exception:

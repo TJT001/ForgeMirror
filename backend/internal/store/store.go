@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"time"
@@ -11,25 +12,26 @@ import (
 )
 
 type Task struct {
-	ID             string     `json:"id"`
-	Status         string     `json:"status"`
-	Profile        string     `json:"profile"`
-	SigningMode    string     `json:"signing_mode"`
-	SourcePath     string     `json:"source_path"`
-	SourceSHA256   *string    `json:"source_sha256,omitempty"`
-	PackageName    *string    `json:"package_name,omitempty"`
-	VersionCode    *int64     `json:"version_code,omitempty"`
-	Attempt        int        `json:"attempt"`
-	MaxAttempts    int        `json:"max_attempts"`
-	LeaseOwner     *string    `json:"lease_owner,omitempty"`
-	LeaseExpiresAt *time.Time `json:"lease_expires_at,omitempty"`
-	HeartbeatAt    *time.Time `json:"heartbeat_at,omitempty"`
-	WorkDir        *string    `json:"work_dir,omitempty"`
-	ResultPath     *string    `json:"result_path,omitempty"`
-	ReasonCode     *string    `json:"reason_code,omitempty"`
-	ErrorMessage   *string    `json:"error_message,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID             string          `json:"id"`
+	Status         string          `json:"status"`
+	Profile        string          `json:"profile"`
+	SigningMode    string          `json:"signing_mode"`
+	Options        json.RawMessage `json:"-"`
+	SourcePath     string          `json:"source_path"`
+	SourceSHA256   *string         `json:"source_sha256,omitempty"`
+	PackageName    *string         `json:"package_name,omitempty"`
+	VersionCode    *int64          `json:"version_code,omitempty"`
+	Attempt        int             `json:"attempt"`
+	MaxAttempts    int             `json:"max_attempts"`
+	LeaseOwner     *string         `json:"lease_owner,omitempty"`
+	LeaseExpiresAt *time.Time      `json:"lease_expires_at,omitempty"`
+	HeartbeatAt    *time.Time      `json:"heartbeat_at,omitempty"`
+	WorkDir        *string         `json:"work_dir,omitempty"`
+	ResultPath     *string         `json:"result_path,omitempty"`
+	ReasonCode     *string         `json:"reason_code,omitempty"`
+	ErrorMessage   *string         `json:"error_message,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
 }
 
 type Event struct {
@@ -94,14 +96,16 @@ func (s *Store) Migrate(ctx context.Context, dir string) error {
 	return nil
 }
 
-const taskColumns = `id, status, profile, signing_mode, source_path, source_sha256,
-	package_name, version_code, attempt, max_attempts, lease_owner, lease_expires_at,
-	heartbeat_at, work_dir, result_path, reason_code, error_message, created_at, updated_at`
+const taskColumns = `id, status, profile, signing_mode, options, source_path,
+	source_sha256, package_name, version_code, attempt, max_attempts, lease_owner,
+	lease_expires_at, heartbeat_at, work_dir, result_path, reason_code,
+	error_message, created_at, updated_at`
 
 func scanTask(row pgx.Row) (Task, error) {
 	var task Task
 	err := row.Scan(&task.ID, &task.Status, &task.Profile, &task.SigningMode,
-		&task.SourcePath, &task.SourceSHA256, &task.PackageName, &task.VersionCode,
+		&task.Options, &task.SourcePath, &task.SourceSHA256, &task.PackageName,
+		&task.VersionCode,
 		&task.Attempt, &task.MaxAttempts, &task.LeaseOwner, &task.LeaseExpiresAt,
 		&task.HeartbeatAt, &task.WorkDir, &task.ResultPath, &task.ReasonCode,
 		&task.ErrorMessage, &task.CreatedAt, &task.UpdatedAt)
@@ -109,12 +113,16 @@ func scanTask(row pgx.Row) (Task, error) {
 }
 
 func (s *Store) CreateTask(ctx context.Context, id, sourcePath, sha256,
-	profile, signingMode string) (Task, error) {
+	profile, signingMode string, options json.RawMessage) (Task, error) {
+	if len(options) == 0 {
+		options = json.RawMessage(`{}`)
+	}
 	row := s.pool.QueryRow(ctx, `
-		INSERT INTO tasks (id, source_path, source_sha256, profile, signing_mode)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO tasks
+			(id, source_path, source_sha256, profile, signing_mode, options)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING `+taskColumns,
-		id, sourcePath, sha256, profile, signingMode)
+		id, sourcePath, sha256, profile, signingMode, options)
 	return scanTask(row)
 }
 
