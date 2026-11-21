@@ -63,19 +63,39 @@ hook_maps 9
 cloud ['com.bluestacks.', 'com.microvirt.', 'com.mumu.', 'com.netease.mumu.', 'com.androVM.', 'com.bignox.']
 ```
 
-单测覆盖：su 路径、mount 行、模拟器路径/Build/属性/包名、hook maps 分组、Xposed/SandHook 类、`LD_PRELOAD`、`TracerPid`/zombie，以及资产来源元数据。
+### 设备矩阵
+
+| 设备 | 环境 | 命中 | 结论 |
+|---|---|---|---|
+| Pixel 5（Android 11 / API 30） | 已 root，Magisk + Zygisk | `yidun_root` `/system_ext/bin/su`；`yidun_mount` `mount:magisk:...` | root/mount 真阳性；emulator/hook/xposed/injection 0 命中 |
+| Medium_Phone_API_37.0（API 37，arm64） | 标准 AVD | `yidun_emulator` `property:ro.kernel.qemu=1` | 模拟器真阳性；hook/xposed/injection 0 命中 |
+
+探针耗时（同一测试）：Pixel 5 约 74 ms；API 37 模拟器约 364 ms。首轮模拟器约 13 s，原因是每个属性都重新反射解析 `SystemProperties`；缓存反射句柄后降到 364 ms。
+
+设备测试：`android/app/src/androidTest/java/dev/forgemirror/demo/YidunProbeDeviceTest.java`。
+
+```bash
+ANDROID_SERIAL=<serial> ./gradlew :app:connectedDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=dev.forgemirror.demo.YidunProbeDeviceTest
+```
+
+断言策略：真机不得出现 emulator 命中；模拟器必须出现 emulator 命中；两类设备都不得出现 hook/xposed/injection 命中。root 命中不设断言，取决于设备是否 root。
+
+单测覆盖：su 路径、mount 行与标记去重、模拟器路径/Build/属性/包名、hook maps 分组、Xposed/SandHook 类、`LD_PRELOAD`、`TracerPid`/zombie，以及资产来源元数据。
 
 ## 限制
 
-1. **未做设备实测**：本次只完成编译、单测和资产校验；功能矩阵标 `prototype`，不能标 `verified`。
-2. `android.os.SystemProperties` 与 `ServiceManager` 走反射，Android 9+ hidden API 限制下可能返回空；失败按未命中处理，不误报。
-3. `Seccomp=2` 是常见基线，未单独判风险；`NativeBridgeError` 只给 0.4 置信度。
-4. `getPackagesForUid` 通常只返回同 UID 包，云手机包名检测覆盖面有限。
-5. 易盾 ROM 品牌包名（`com.samsung.` 等）只作研究上下文，未接入扫描，避免大面积误报。
-6. 通用 `env_*` 与易盾 `yidun_*` 可能对同一条件各记一条事件；evidence 相同的会去重，保留双规则是为了来源可追溯。
+1. **设备矩阵仍小**：目前只有 Pixel 5（Android 11，已 root）和 API 37 模拟器；更多 ROM/ABI 组合未覆盖，功能矩阵仍标 `prototype`。
+2. 测试机装有 Zygisk，通用 `env_injection` 会命中（真阳性）；易盾 maps 标记不含 zygisk，因此 `yidun_injection` 未命中，符合预期。
+3. `android.os.SystemProperties` 与 `ServiceManager` 走反射，Android 9+ hidden API 限制下可能返回空；API 37 模拟器上 `ro.kernel.qemu` 可读，其他 ROM 需逐项确认。
+4. `Seccomp=2` 是常见基线，未单独判风险；`NativeBridgeError` 只给 0.4 置信度。
+5. `getPackagesForUid` 通常只返回同 UID 包，云手机包名检测覆盖面有限。
+6. 易盾 ROM 品牌包名（`com.samsung.` 等）只作研究上下文，未接入扫描，避免大面积误报。
+7. 通用 `env_*` 与易盾 `yidun_*` 可能对同一条件各记一条事件；evidence 相同的会去重，保留双规则是为了来源可追溯。
+8. mount 命中已按标记去重：同一标记只报一条，避免 Magisk 多行挂载刷屏。
 
 ## 下一步
 
-1. 在真机 / 模拟器矩阵跑一次，确认无误报并补设备证据。
+1. 扩充设备矩阵：至少覆盖一个非 root 真机、一个厂商 ROM 和一个 32 位 ABI，确认无误报。
 2. 把易盾增量特征接入 PKR1 规则包版本门控，支持远程更新。
 3. 评估 DEX 魔数/`dex2oat` 检查是否并入容器完整性原型（DET-04）。

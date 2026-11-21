@@ -89,16 +89,20 @@ public final class YidunProbe {
     }
 
     static boolean matchMountLine(String line, YidunSignatures signatures) {
+        return matchMountMarker(line, signatures) != null;
+    }
+
+    static String matchMountMarker(String line, YidunSignatures signatures) {
         if (line == null) {
-            return false;
+            return null;
         }
         String lower = line.toLowerCase(Locale.US);
         for (String marker : signatures.mountMarkers) {
             if (lower.contains(marker.toLowerCase(Locale.US))) {
-                return true;
+                return marker;
             }
         }
-        return false;
+        return null;
     }
 
     static boolean matchEmulatorPath(String path, YidunSignatures signatures) {
@@ -235,9 +239,12 @@ public final class YidunProbe {
         if (mounts.isEmpty()) {
             return;
         }
+        Set<String> reportedMarkers = new LinkedHashSet<>();
         for (String line : mounts.split("\n")) {
-            if (matchMountLine(line, signatures)) {
-                add(findings, seen, RULE_MOUNT, "root", line.trim(), 0.6);
+            String marker = matchMountMarker(line, signatures);
+            if (marker != null && reportedMarkers.add(marker)) {
+                add(findings, seen, RULE_MOUNT, "root",
+                        "mount:" + marker + ":" + line.trim(), 0.6);
             }
         }
     }
@@ -449,10 +456,31 @@ public final class YidunProbe {
         }
     }
 
+    private static volatile Method systemPropertyGet;
+    private static volatile boolean systemPropertyResolved;
+    private static volatile Method serviceManagerGet;
+    private static volatile boolean serviceManagerResolved;
+
     private static String property(String name) {
+        Method get = systemPropertyGet;
+        if (!systemPropertyResolved) {
+            synchronized (YidunProbe.class) {
+                if (!systemPropertyResolved) {
+                    try {
+                        Class<?> properties = Class.forName("android.os.SystemProperties");
+                        systemPropertyGet = properties.getMethod("get", String.class);
+                    } catch (Throwable ignored) {
+                        systemPropertyGet = null;
+                    }
+                    systemPropertyResolved = true;
+                }
+                get = systemPropertyGet;
+            }
+        }
+        if (get == null) {
+            return null;
+        }
         try {
-            Class<?> properties = Class.forName("android.os.SystemProperties");
-            Method get = properties.getMethod("get", String.class);
             Object value = get.invoke(null, name);
             return value instanceof String ? (String) value : null;
         } catch (Throwable ignored) {
@@ -461,9 +489,25 @@ public final class YidunProbe {
     }
 
     private static boolean serviceExists(String name) {
+        Method getService = serviceManagerGet;
+        if (!serviceManagerResolved) {
+            synchronized (YidunProbe.class) {
+                if (!serviceManagerResolved) {
+                    try {
+                        Class<?> manager = Class.forName("android.os.ServiceManager");
+                        serviceManagerGet = manager.getMethod("getService", String.class);
+                    } catch (Throwable ignored) {
+                        serviceManagerGet = null;
+                    }
+                    serviceManagerResolved = true;
+                }
+                getService = serviceManagerGet;
+            }
+        }
+        if (getService == null) {
+            return false;
+        }
         try {
-            Class<?> manager = Class.forName("android.os.ServiceManager");
-            Method getService = manager.getMethod("getService", String.class);
             return getService.invoke(null, name) != null;
         } catch (Throwable ignored) {
             return false;

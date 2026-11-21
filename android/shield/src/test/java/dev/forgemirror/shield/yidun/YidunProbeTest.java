@@ -47,6 +47,12 @@ public final class YidunProbeTest {
                 "/dev/block/dm-1 /system_root ext4 ro 0 0", signatures));
         assertFalse(YidunProbe.matchMountLine(
                 "/dev/block/dm-1 /data ext4 rw 0 0", signatures));
+        assertEquals("magisk", YidunProbe.matchMountMarker(
+                "magisk /system/lib tmpfs ro 0 0", signatures));
+        assertEquals("system_root", YidunProbe.matchMountMarker(
+                "/dev/block/dm-1 /system_root ext4 ro 0 0", signatures));
+        assertNull(YidunProbe.matchMountMarker(
+                "/dev/block/dm-1 /data ext4 rw 0 0", signatures));
     }
 
     @Test
