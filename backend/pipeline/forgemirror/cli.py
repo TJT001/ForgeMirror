@@ -70,9 +70,9 @@ def build(
                                            help="bundletool executable or standalone jar."),
     aab_mode: str = typer.Option("universal", "--aab-mode",
                                  help="AAB conversion mode: universal or split."),
-    device_spec: Path | None = typer.Option(None, "--device-spec", exists=True,
-                                            dir_okay=False,
-                                            help="bundletool device spec for --aab-mode=split."),
+    device_spec: list[Path] = typer.Option([], "--device-spec", exists=True,
+                                           dir_okay=False,
+                                           help="Repeatable bundletool device spec for --aab-mode=split."),
 ) -> None:
     """Run S0 -> S1 -> S2 and write the build artifacts."""
     if profile not in PROFILES:
@@ -83,26 +83,82 @@ def build(
         raise typer.Exit(2)
 
     tools = _discover(sdk_root, build_tools)
-    result = run_build(
-        BuildOptions(
-            apk=apk,
-            out=out,
-            profile=profile,
-            signing_mode=signing_mode,
-            build_id=build_id,
-            cert_allowlist=_load_allowlist(cert_allowlist),
-            allow_unsigned=allow_unsigned,
-            shell_version=shell_version,
-            key_file=key_file,
-            splits=split,
-            bundletool=bundletool,
-            aab_mode=aab_mode,
-            device_spec=device_spec,
-        ),
-        tools,
+    if device_spec and (apk.suffix.lower() != ".aab" or aab_mode != "split"):
+        typer.echo("--device-spec requires .aab with --aab-mode split", err=True)
+        raise typer.Exit(2)
+    if len(device_spec) > 1:
+        if apk.suffix.lower() != ".aab" or aab_mode != "split":
+            typer.echo("multiple --device-spec requires .aab with --aab-mode split",
+                       err=True)
+            raise typer.Exit(2)
+        if split:
+            typer.echo("--split cannot be combined with AAB device specs", err=True)
+            raise typer.Exit(2)
+
+    batch_id = build_id or str(uuid.uuid4())
+    specs: list[Path | None] = list(device_spec) or [None]
+    batch_root = out
+    if len(specs) > 1 and batch_root is None:
+        batch_root = Path("artifacts") / batch_id
+    used_names: set[str] = set()
+    allowlist = _load_allowlist(cert_allowlist)
+
+    def build_one(spec: Path | None, index: int) -> dict:
+        if len(specs) == 1:
+            work_out = out
+        else:
+            assert batch_root is not None
+            stem = spec.stem if spec is not None else "default"
+            safe = "".join(char if char.isalnum() or char in "._-" else "_"
+                           for char in stem)
+            name = f"{index:02d}_{safe}"
+            while name in used_names:
+                name = f"{index:02d}_{safe}_{len(used_names)}"
+            used_names.add(name)
+            work_out = Path(batch_root) / name
+        return run_build(
+            BuildOptions(
+                apk=apk,
+                out=work_out,
+                profile=profile,
+                signing_mode=signing_mode,
+                build_id=batch_id,
+                cert_allowlist=allowlist,
+                allow_unsigned=allow_unsigned,
+                shell_version=shell_version,
+                key_file=key_file,
+                splits=split,
+                bundletool=bundletool,
+                aab_mode=aab_mode,
+                device_spec=spec,
+            ),
+            tools,
+        )
+
+    if len(specs) == 1:
+        result = build_one(specs[0], 0)
+        _echo(result)
+        if not result["ok"]:
+            raise typer.Exit(1)
+        return
+
+    assert batch_root is not None
+    batch_root = Path(batch_root)
+    batch_root.mkdir(parents=True, exist_ok=True)
+    outcomes = [build_one(spec, index) for index, spec in enumerate(specs)]
+    batch = {
+        "schema": "forgemirror.build-batch/1",
+        "batch_id": batch_id,
+        "aab": str(apk),
+        "device_specs": [str(spec) for spec in specs if spec is not None],
+        "ok": all(item["ok"] for item in outcomes),
+        "sets": outcomes,
+    }
+    (batch_root / "batch.json").write_text(
+        json.dumps(batch, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     )
-    _echo(result)
-    if not result["ok"]:
+    _echo(batch)
+    if not batch["ok"]:
         raise typer.Exit(1)
 
 

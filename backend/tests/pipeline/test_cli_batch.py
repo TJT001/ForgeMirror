@@ -64,6 +64,41 @@ class BatchCliTests(unittest.TestCase):
             self.assertEqual(
                 batch["device_specs"], [str(spec1), str(spec2)])
 
+    def test_build_creates_one_set_per_device_spec(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            aab = root / "app.aab"
+            aab.write_bytes(b"aab")
+            spec1 = root / "spec-30.json"
+            spec2 = root / "spec-26.json"
+            spec1.write_text("{}")
+            spec2.write_text("{}")
+            out = root / "builds"
+
+            def fake_build(options, tools):
+                work = Path(options.out)
+                work.mkdir(parents=True, exist_ok=True)
+                (work / "container.fdx").write_bytes(b"FDX2")
+                return {"ok": True, "out": str(work),
+                        "build_id": options.build_id, "splits": []}
+
+            with mock.patch.object(cli, "_discover", return_value=object()), \
+                    mock.patch.object(cli, "run_build", side_effect=fake_build):
+                result = CliRunner().invoke(cli.app, [
+                    "build", "--apk", str(aab),
+                    "--aab-mode", "split",
+                    "--device-spec", str(spec1),
+                    "--device-spec", str(spec2),
+                    "--out", str(out),
+                ])
+            self.assertEqual(result.exit_code, 0, result.output)
+            batch = json.loads((out / "batch.json").read_text())
+            self.assertEqual(batch["schema"], "forgemirror.build-batch/1")
+            self.assertTrue(batch["ok"])
+            self.assertEqual(len(batch["sets"]), 2)
+            self.assertTrue((out / "00_spec-30" / "container.fdx").is_file())
+            self.assertTrue((out / "01_spec-26" / "container.fdx").is_file())
+
     def test_device_spec_rejected_for_universal(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
