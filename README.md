@@ -54,4 +54,4 @@ backend/pipeline/scripts/check.sh
 - [开发环境](docs/开发环境.md)
 - [依赖登记](docs/components.lock.json)
 
-研究文档中的旧相对路径以 `/Users/taylee/SourceCode/pentest/zhiji` 和 `/Users/taylee/SourceCode/pentest/waimai` 为准。原目录说明归档在 docs/初始目录说明归档.md，仅作历史资料。
+研究文档中的旧相对路径以 `<external-research-dir>/reference-a` 和 `<external-research-dir>/sampleb` 为准。原目录说明归档在 docs/初始目录说明归档.md，仅作历史资料。

@@ -1,7 +1,7 @@
-> **来源**：`/Users/taylee/SourceCode/pentest/waimai/libnesec_全功能还原文档.md`（2026-11-20/21）。
+> **来源**：`<external-research-dir>/sampleb/libnesec_全功能还原文档.md`（2026-11-20/21）。
 > **定位**：ForgeMirror 参照样本 B（网易易盾），与 `libDexHelper_架构还原.md`（参照样本 A）并列。
 > **证据级别映射**：原文 `观测`→`V`，`代码`→`S`，`推断`→`I`，`未知`→`U`（定义见 `docs/设计文档.md` §17.1）。
-> **产物位置**：文中 `artifacts/...` 均相对 `/Users/taylee/SourceCode/pentest/waimai/`。运行时 dump、伪代码与等价 C 代码属外部研究产物，**不进入本仓库**（根 `artifacts/` 被 git 忽略；`docs/实现原则.md` §2 禁止打包原厂反编译产物）。
+> **产物位置**：文中 `artifacts/...` 均相对 `<external-research-dir>/sampleb/`。运行时 dump、伪代码与等价 C 代码属外部研究产物，**不进入本仓库**（根 `artifacts/` 被 git 忽略；`docs/实现原则.md` §2 禁止打包原厂反编译产物）。
 > **吸收边界**：只吸收检测能力与方法论；不复刻 `exit_group` 响应、7-bit 字符串混淆和本构建不可达的证书链，取舍见 `docs/设计文档.md` §17.9。
 
 ---
@@ -11,7 +11,7 @@
 - 日期：2026-11-20
 - 目标：网易易盾加固 native 库 `libnesec.so`（SONAME `libsecexe.so`）
 - 样本 SHA-256：`8ff576e1cc403f0d6173bee361dabc362be6319f4b71ceb375834600a50005ff`
-- 运行时版本：易盾 `7.6.3_996`；APK `com.waimaiii.waimaiii` 1.1.217（versionCode 299）
+- 运行时版本：易盾 `7.6.3_996`；APK `com.example.sampleb`
 - 本文件回答两件事：
   1. `libnesec.so` 里到底有哪些功能、如何连接；
   2. 哪些行为可以等价复现，复现代码在哪里。
@@ -273,9 +273,9 @@ EXIT tid=21664 nr=94 status=4294967295 pc=0x71ef3ad614 off=0x2d614
 
 **稳定性验证（2026-11-21）**：
 - 注入 patch 后进程存活 35s+，Frida detach 后仍存活（pid 13174）。
-- 截图确认 UI 正常：启动广告页 → 点击“跳过” → 进入首页（搜索、领券、霸王餐列表、底部 Tab 全部渲染）。
+- 截图确认 UI 正常：启动页 → 点击“跳过” → 首页列表与底部 Tab 正常渲染。
 - logcat 无 FATAL/ANR；仅有正常 SDK/网络日志与一次 Toast（index 4）。
-- 复跑脚本：`artifacts/frida/waimai_exit_bypass.js`。
+- 复跑脚本：`artifacts/frida/sampleb_exit_bypass.js`。
 
 
 ### 4.3 Root

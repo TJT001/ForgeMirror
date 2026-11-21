@@ -2,7 +2,7 @@
 
 > **最新全量进度汇总见 §45**（自解密 / DEX 容器解密 14/14 / classes.dve / info.y=YARA 规则 / .edata / DVE 文件加密 / 壳引擎规则命中验证均已打通）。
 
-- 样本：`libDexHelper.so`（arm64），智己 APP `com.immotors.lapp` v3.2.5
+- 样本：`libDexHelper.so`（arm64），参照样本 A `com.example.reference`
 - 文件 SHA-256：`d7455105a14ae87bc76e3f5db04e5bdcfd1f4fa7b5949d4a8f49ed623fc4ebdd`
 - 文件大小：979,501 字节；依赖：`libandroid.so` `liblog.so` `libz.so` `libm.so` `libdl.so` `libc.so`
 - 本文日期：2026-11-11
@@ -339,7 +339,7 @@ dexposedCallHandler, frida_agent_main
 | IDA 伪代码（全量强制） | `analysis/libDexHelper/ida_force/functions/*.c` + `functions.json` |
 | IDA 伪代码（自动分析） | `analysis/libDexHelper/pseudo_dec/functions/*.c` |
 | 字符串清单 | `analysis/libDexHelper/strings_all.txt`、`strings_selected.txt` |
-| 运行时常量/检测点 | `检测函数定位与绕过说明.md`、`智己APP_加固与反调试绕过.md` |
+| 运行时常量/检测点 | `检测函数定位与绕过说明.md`、`参照样本A_加固与反调试绕过.md` |
 | 工具脚本 | `analysis/tools/ida_dump.py`、`ida_force_dump.py`、`unpack.py`、`lzss_decode.py`、`sm4.py`、`fdex_unpack.py`、`dve_rc4.py`、`unicorn_dve.py`、`unicorn_hash.py`、`rename_imports.py`、`ida_retype_dump.py`（完整索引见 §45.4） |
 | 解释器 | IDA 9.3 idalib + REA 6.8.0（`REA_IDA_MCP_CONFIG=~/.local/share/rea/ida-mcp.json`） |
 
@@ -941,7 +941,7 @@ assets/RES_RULE                          ← 资源加密规则（11 字节记�
 **已排除的方案**（对 `coreclasses.bangcle` 实测）：
 
 - `zlib/gzip/raw deflate` 解压：全部失败；
-- RC4（密钥候选：`IMZHijiApp!@#$%^`、`46EBA22EF5204DD5`、包名、`TheApp`、Bangcle 标记、`KEY_RES_ENC` 等）：首块均非 `dex\n`；
+- RC4（密钥候选：`<redacted-key-candidate>`、`46EBA22EF5204DD5`、包名、`TheApp`、Bangcle 标记、`KEY_RES_ENC` 等）：首块均非 `dex\n`；
 - 单字节 XOR：无命中；
 - AES-ECB/CBC（同批密钥）：首块均非 `dex\n`；
 - 各库中均**不存在**标准 AES S-box（`libphofo` 的 AES 是 Java 侧 `AES/ECB/PKCS5/7Padding`）。
@@ -960,8 +960,8 @@ assets/RES_RULE                          ← 资源加密规则（11 字节记�
 
 ### 21.1 环境与方法
 
-- 设备：`08211FDD40034E`，`frida-server-17.16.4 @ 127.0.0.1:49157`
-- 注入：`frida -f com.immotors.lapp`，单会话加载 `bypass_final.js` + `det_patch.js` + `msa_loop_off.js` + 抓取脚本
+- 设备：`<device-serial>`，`frida-server-17.16.4 @ 127.0.0.1:49157`
+- 注入：`frida -f com.example.reference`，单会话加载 `bypass_final.js` + `det_patch.js` + `msa_loop_off.js` + 抓取脚本
 - 两种抓取方式：
   1. **ART 边界 Hook**：`libdexfile.so` 的 `DexFile::OpenCommon` / `ArtDexFileLoader::Open`，`onEnter` 拷贝缓冲、`setImmediate` 落盘（避免阻塞 ART）
   2. **内存扫描**：t=8s 扫描 `r--` 范围 `64 65 78 0a 30 33`（`dex\n03`），按 DEX 头 `file_size` 转储
@@ -978,7 +978,7 @@ assets/RES_RULE                          ← 资源加密规则（11 字节记�
 <app>/base.apk
 <app>/oat/arm64/base.art
 <app>/lib/arm64/libDexHelper.so
-/data/user/0/com.immotors.lapp/.cache/classes.dve     ← 24 字节
+/data/user/0/com.example.reference/.cache/classes.dve     ← 24 字节
 <app>/base.apk   (再次)
 ```
 
@@ -1059,7 +1059,7 @@ a3 = 指向 dex 的缓冲（头 'dex\n038'）
  5,804,368 /  4,314,184 /  1,941,504
 ```
 
-索引：`analysis/dexcap_stalker_index.json`；设备目录 `/sdcard/Android/data/com.immotors.lapp/files/dexcap/dex_*.bin`。
+索引：`analysis/dexcap_stalker_index.json`；设备目录 `/sdcard/Android/data/com.example.reference/files/dexcap/dex_*.bin`。
 
 ### 22.4 尚未完成
 
@@ -1155,7 +1155,7 @@ Hook `malloc/calloc/mmap/mmap64` 记录 ≥1MB 分配的调用栈，想直接拿
 
 | 目标 | 参数 | 说明 |
 |---|---|---|
-| `+0x41f80` | `a0="com.immotors..."`、`a1="/data/ap..."` | 资源/edata 处理入口 |
+| `+0x41f80` | `a0="com.example.reference"`、`a1="/data/ap..."` | 资源/edata 处理入口 |
 | `+0x2d030` | `a0=PK\x01\x02…`、ELF 头、`/apex/...` | ZIP/ELF 缓冲处理 |
 | `+0x2ccd0` | `a0=0x7c4c42a000 (7f454c46…)`、`a1=0xeed10`、`a2=0x10` | 处理 ELF 镜像（约 978 KB） |
 | `+0x2c950` | `/proc/21…`、`/dev/null`、`/apex/…` | 字符串比较/过滤 |
@@ -1170,17 +1170,17 @@ Hook `malloc/calloc/mmap/mmap64` 记录 ≥1MB 分配的调用栈，想直接拿
 ```
 buf=0x7c3efaebc0 size=0xf6b10c head="dex\n"
    range base=0x7c3ef86000 size=134,025,216 prot=rw-
-   file=/data/data/com.immotors.lapp/.cache/classes.jar
+   file=/data/data/com.example.reference/.cache/classes.jar
 buf=0x7c3ff1abc0 size=0xba3600 head="dex\n"
    range base=0x7c3ef86000 size=134,025,216 prot=rw-
-   file=/data/data/com.immotors.lapp/.cache/classes.jar
+   file=/data/data/com.example.reference/.cache/classes.jar
 ```
 
 即：壳把 134 MB 的 `classes.jar`（头部是合法 `dex\n038`，正文加密）**mmap 成可写**，在内存里**原地解密**，再把各子区间交给 `DexFileLoader::Load`。
 
 ### 25.3 已取得密文/明文对
 
-- 通过 Frida `File` 分块复制出 `/data/data/com.immotors.lapp/.cache/classes.jar`（134,024,136 B，与 APK `classes.dex` 同尺寸、同头）
+- 通过 Frida `File` 分块复制出 `/data/data/com.example.reference/.cache/classes.jar`（134,024,136 B，与 APK `classes.dex` 同尺寸、同头）
 - 文件在偏移 `0x28BC0` 处为密文（`6a a8 d4 10 …`），同偏移内存中为明文 DEX（`dex\n038`）
 - 计算 `keystream = pt XOR ct`：熵 7.61，周期检测（8/16/32/…/4096）命中率均 ≈ 0.004（随机水平）→ **流密码/CTR 类，非简单 XOR 重复密钥**
 
@@ -1713,8 +1713,8 @@ s3 = compress(s2, 0^64) = 027a8400d09a96101d9ca1763dedbe29
 
 ```
 KDF_CONST16 = libDexHelper.dec.so @0xc2a50 = 66 97 6c e8 6d 46 38 b0 09 5a a5 d7 0f cb 9a a0
-key16       = KDF_CONST16 XOR "com.immotors.lapp"[:16]
-            = 05f801c6042b55df7d35d7a421a7fbd0
+key16       = KDF_CONST16 XOR "com.example.reference"[:16]
+            = <redacted-derived-key>
 ```
 
 即密钥只与 **so 内静态常量 + 包名** 有关，与设备、账号、安装路径无关。
@@ -1762,8 +1762,8 @@ classes.jar
 
 ```
 python3 -I analysis/tools/fdex_unpack.py \
-  classes.jar libDexHelper.dec.so com.immotors.lapp outdir
-key=05f801c6042b55df7d35d7a421a7fbd0  dexdata0=0x27bc0  table=0x28ae0  entries=14
+  classes.jar libDexHelper.dec.so com.example.reference outdir
+key=<redacted-derived-key>  dexdata0=0x27bc0  table=0x28ae0  entries=14
 wrote 14 files
 ```
 
@@ -1806,7 +1806,7 @@ wrote 14 files
 
 ### 40.2 文件内容 **[观测 + 静态]**
 
-设备 `/data/data/com.immotors.lapp/.cache/classes.dve`（24 B）：
+设备 `/data/data/com.example.reference/.cache/classes.dve`（24 B）：
 
 ```
 eaead842 e35e752b 5903287e a6ad3ddd | 8cc3e26a 00000000
@@ -1889,7 +1889,7 @@ TaiChi / Youpk / FUPK3 / FART / YARFA hook / RootHide 等框架的特征串、AR
   - `sub_46188(apkPath, &buf, "assets/info.y", 0)` 从 APK 取资源；
   - `snprintf("%s%s", dir, ".cache/info.y")` → `open/write/close` 落盘；
   - 上层还有一个「文件守护」循环，反复检查/补回该文件；
-- 设备观测：`/data/data/com.immotors.lapp/.cache/info.y`，9586 B，
+- 设备观测：`/data/data/com.example.reference/.cache/info.y`，9586 B，
   mtime 与 classes.jar 同批（2026-11-05 14:59），说明随 payload 一起更新。
 
 ### 41.3 文件格式 **[静态 + 验证]**
@@ -2202,7 +2202,7 @@ DVE 文件加密（RC4，实体验证）→ **`info.y` 完整还原为编译后�
 | DEX 容器 | `classes.jar`：伪 DEX 头 + `dexdata0`@`0x27BC0`；记录表 @`dexdata0+0x1000-14*16`（`0x28AE0`） |
 | 记录格式 | `{u32be offset, u32be size, 8B 0}`，14 条（0…13） |
 | 条目存储 | `dexdata0+0x1000+offset`；**前 `0x20000` 字节 SM4 密文，其余明文** |
-| SM4 密钥 | `so@0xC2A50`(16B) XOR 包名 `com.immotors.lapp`[:16] = `05f801c6042b55df7d35d7a421a7fbd0` |
+| SM4 密钥 | `so@0xC2A50`(16B) XOR 包名 `com.example.reference`[:16] = `<redacted-derived-key>` |
 | SM4 参数 | 32 轮 T 表；T0@`0xC5CE0`、TBOX0/1/2@`0xEA000/0xEA400/0xEA800`（与公开常量 0/256 差异） |
 | `vtag` | so@`0xEAC90`，64 B；`classes.dve` = `MD5(vtag)` 16 B + `fstat().st_ctim` 8 B |
 | `info.y` | `INFO-` + `MD5(body[0x16:])` + count(1B, 本文件 12) + 12×`{u32 offset, u32 flags, u32 size}` + 尾部 **214×`{u32 section, u32 offset}` 重定位** |
@@ -2316,7 +2316,7 @@ python3 -I analysis/tools/unpack.py analysis/libDexHelper/libDexHelper.so -o /tm
 
 # 2) classes.jar -> 14 DEX（需设备上的 classes.jar）
 python3 -I analysis/tools/fdex_unpack.py /tmp/classes.jar \
-    analysis/libDexHelper/libDexHelper.dec.so com.immotors.lapp /tmp/fdex_out
+    analysis/libDexHelper/libDexHelper.dec.so com.example.reference /tmp/fdex_out
 
 # 3) DVE 文件解密（enc_type/0）
 python3 -I analysis/tools/dve_rc4.py analysis/libDexHelper/libDexHelper.dec.so enc.xml dec.xml

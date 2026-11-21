@@ -8,7 +8,7 @@
     "runtime_version": "7.6.3_996",
     "captured": "2026-11-20/21",
     "evidence": "docs/research/libnesec_易盾加固还原.md",
-    "extracted_by": "ForgeMirror research, sample com.waimaiii.waimaiii 1.1.217"
+    "extracted_by": "ForgeMirror research, sample com.example.sampleb"
   },
   "notes": [
     "Only detection signatures are carried over; product rules stay independently written.",

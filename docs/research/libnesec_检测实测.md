@@ -1,5 +1,5 @@
-> **来源**：`/Users/taylee/SourceCode/pentest/waimai/libnesec_标志位与检测实测.md`。
-> 证据级别映射：观测→V，代码→S，推断→I，未知→U。产物 `artifacts/...` 相对 `/Users/taylee/SourceCode/pentest/waimai/`，不入本仓库。
+> **来源**：`<external-research-dir>/sampleb/libnesec_标志位与检测实测.md`。
+> 证据级别映射：观测→V，代码→S，推断→I，未知→U。产物 `artifacts/...` 相对 `<external-research-dir>/sampleb/`，不入本仓库。
 > 关联规格：`docs/设计文档.md` §17.9；实现：`android/shield/src/main/java/dev/forgemirror/shield/yidun/`。
 
 ---
@@ -30,7 +30,7 @@
 
 | 偏移 | 内容 |
 |---|---|
-| `+0x00` | `std::string` 包名 `com.waimaiii.waimaiii`（flag=0x2A，len=21） |
+| `+0x00` | `std::string` 包名 `com.example.sampleb`（flag=0x2A，len=19） |
 | `+0x18` | `std::string` 应用类 `cn.fly.FlyApplication` |
 | `+0x30` | qword `0x31`（字符 '1'，疑似 debug 标志） |
 | `+0x38` | qword `0x20` |
@@ -217,11 +217,11 @@ BL sub_D55AC            ; 入队
 
 ```bash
 # 块级命中
-frida -U -f com.waimaiii.waimaiii -l /tmp/wm_tools/blk_probe.js -q -t 24 --runtime=v8
+frida -U -f com.example.sampleb -l /tmp/wm_tools/blk_probe.js -q -t 24 --runtime=v8
 # 门控开关
-frida -U -f com.waimaiii.waimaiii -l /tmp/wm_tools/a4cdc_flags.js -q -t 25 --runtime=v8
+frida -U -f com.example.sampleb -l /tmp/wm_tools/a4cdc_flags.js -q -t 25 --runtime=v8
 # 风险码与 wrapper
-frida -U -f com.waimaiii.waimaiii -l /tmp/wm_tools/wrapper_trace.js -q -t 28 --runtime=v8
+frida -U -f com.example.sampleb -l /tmp/wm_tools/wrapper_trace.js -q -t 28 --runtime=v8
 # 检测函数命中面
-frida -U -f com.waimaiii.waimaiii -l /tmp/wm_tools/detect_probe.js -q -t 26 --runtime=v8
+frida -U -f com.example.sampleb -l /tmp/wm_tools/detect_probe.js -q -t 26 --runtime=v8
 ```

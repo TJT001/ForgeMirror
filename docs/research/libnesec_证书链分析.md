@@ -1,5 +1,5 @@
-> **来源**：`/Users/taylee/SourceCode/pentest/waimai/libnesec_证书校验分析.md`。
-> 证据级别映射：观测→V，代码→S，推断→I，未知→U。产物 `artifacts/...` 相对 `/Users/taylee/SourceCode/pentest/waimai/`，不入本仓库。
+> **来源**：`<external-research-dir>/sampleb/libnesec_证书校验分析.md`。
+> 证据级别映射：观测→V，代码→S，推断→I，未知→U。产物 `artifacts/...` 相对 `<external-research-dir>/sampleb/`，不入本仓库。
 > 结论：本构建该链不可达，仅作完整性设计反例；不进入实现（见 `docs/设计文档.md` §17.9）。
 
 ---
@@ -85,7 +85,7 @@ android/support/v4/os/ks/bc\0
 
 ## 3. 类本体不存在的六项证据
 
-1. **APK zip 全量扫描**：`waimai_base.apk` 全部条目（含 82MB `classes.dex`、`assets/*.jar`）grep `os/ks/bc` = 0 命中。
+1. **APK zip 全量扫描**：`sampleb_base.apk` 全部条目（含 82MB `classes.dex`、`assets/*.jar`）grep `os/ks/bc` = 0 命中。
 2. **全部 .so**：`libnesec.so`、`libsecsdk.so`、`libnesec-x86.so`、`libInno.so` 明文均无该串；`libnesec` 的密文形态只出现在 §2 的表项（即“期望类名”，不是类定义）。
 3. **解密镜像明文**：`libnesec_late_flat.bin` / `libnesec_full.so` grep `ks/bc`、`bc;`、`/bc` 均为 -1。
 4. **镜像无 class 文件**：全镜像 `CA FE BA BE` 出现 0 次 → 不走 JNI `DefineClass` 自造类。

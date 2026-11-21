@@ -1,4 +1,4 @@
-> **来源**：`/Users/taylee/SourceCode/pentest/waimai/libnesec_函数分类汇总.md`。
+> **来源**：`<external-research-dir>/sampleb/libnesec_函数分类汇总.md`。
 > 证据级别映射：观测→V，代码→S，推断→I，未知→U。分类 CSV 属外部研究产物，不入本仓库。
 > 用途：判断检测面与工具函数占比；不把 `*_support` 分类当作专属功能证据（见 `docs/设计文档.md` §17.9）。
 

@@ -1,5 +1,5 @@
-> **来源**：`/Users/taylee/SourceCode/pentest/waimai/libnesec_OLLVM与VM还原.md`。
-> 证据级别映射：观测→V，代码→S，推断→I，未知→U。产物 `artifacts/nesec_vm/` 相对 `/Users/taylee/SourceCode/pentest/waimai/`，不入本仓库。
+> **来源**：`<external-research-dir>/sampleb/libnesec_OLLVM与VM还原.md`。
+> 证据级别映射：观测→V，代码→S，推断→I，未知→U。产物 `artifacts/nesec_vm/` 相对 `<external-research-dir>/sampleb/`，不入本仓库。
 > 结论：该解释器是 JNI 参数/返回编组器，不是保护业务逻辑的 VMP；不复刻（见 `docs/设计文档.md` §17.9）。
 
 ---
@@ -167,7 +167,7 @@ LDP X29, X30, ... ; RET
 
 ### 3.1 调用次数与入参
 
-脚本 `/tmp/wm_tools/vm_trace.js`、`vm_ctx.js`、`vm_str.js`，`frida -U -f com.waimaiii.waimaiii`：
+脚本 `/tmp/wm_tools/vm_trace.js`、`vm_ctx.js`、`vm_str.js`，`frida -U -f com.example.sampleb`：
 
 - 冷启动 45s 内 VM 入口只被调用 **2 次**。
 - 第 1 次：`nreg=3, argc=1, flags=1`，程序串长度 1（`"V"`）。
@@ -231,7 +231,7 @@ ctx 原始内存（第 1 次）：
 # 3. 修复函数边界后重新导出
 #    py_exec_file artifacts/nesec_vm/vm_fix_bounds.py
 # 4. 运行时抓 VM 入参
-frida -U -f com.waimaiii.waimaiii -l /tmp/wm_tools/vm_trace.js -q -t 45 --runtime=v8
+frida -U -f com.example.sampleb -l /tmp/wm_tools/vm_trace.js -q -t 45 --runtime=v8
 ```
 
 注：`vm_fix_bounds.py` 会修改 IDB 的函数定义；如需保留原始状态，先备份 `libnesec_full.so.i64`。

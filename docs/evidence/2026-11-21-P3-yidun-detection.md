@@ -10,10 +10,10 @@
 |---|---|
 | 样本 | `libnesec.so`（SONAME `libsecexe.so`） |
 | SHA-256 | `8ff576e1cc403f0d6173bee361dabc362be6319f4b71ceb375834600a50005ff` |
-| 运行时 | 易盾 `7.6.3_996`；`com.waimaiii.waimaiii` 1.1.217 |
+| 运行时 | 易盾 `7.6.3_996`；`com.example.sampleb` |
 | 主文档 | `docs/research/libnesec_易盾加固还原.md` |
 | 分报告 | `libnesec_检测实测.md`、`libnesec_证书链分析.md`、`libnesec_VM还原.md`、`libnesec_函数分类.md` |
-| 原始产物 | `/Users/taylee/SourceCode/pentest/waimai/artifacts/`（不入本仓库） |
+| 原始产物 | `<external-research-dir>/sampleb/artifacts/`（不入本仓库） |
 
 证据级别已按设计文档 §17.1 映射：原文 `观测`→`V`、`代码`→`S`、`推断`→`I`、`未知`→`U`。
 
