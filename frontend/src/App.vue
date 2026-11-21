@@ -622,8 +622,8 @@ async function cancel() {
         <section class="block events-block">
           <div class="block-head events-head">
             <div>
-              <h3>安全事件</h3>
-              <p>已上报的规则命中与运行时检测记录。</p>
+              <h3>安全风控事件</h3>
+              <p>设备端上报的规则命中、运行时检测与处置记录，用于安全风控。</p>
             </div>
             <div class="event-tools">
               <select v-model="eventKind" @change="loadSecurityEvents">
@@ -653,7 +653,7 @@ async function cancel() {
                   <td class="num mono">{{ item.confidence.toFixed(2) }}</td>
                 </tr>
                 <tr v-if="securityEvents.length === 0">
-                  <td colspan="5" class="empty">暂无安全事件</td>
+                  <td colspan="5" class="empty">暂无安全风控事件</td>
                 </tr>
               </tbody>
             </table>
