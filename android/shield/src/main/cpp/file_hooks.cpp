@@ -133,6 +133,7 @@ using dup3_t = int (*)(int, int, int);
 using flock_t = int (*)(int, int);
 using fcntl_t = int (*)(int, int, ...);
 using dlopen_t = void *(*)(const char *, int);
+using tls_get_addr_t = void *(*)(void *);
 using loader_dlopen_t = void *(*)(const char *, int, const void *);
 using rename_t = int (*)(const char *, const char *);
 using renameat_t = int (*)(int, const char *, int, const char *);
@@ -166,6 +167,7 @@ dup3_t g_dup3 = nullptr;
 flock_t g_flock = nullptr;
 __attribute__((unused)) fcntl_t g_fcntl = nullptr;
 dlopen_t g_dlopen = nullptr;
+tls_get_addr_t g_tls_get_addr = nullptr;
 rename_t g_rename = nullptr;
 renameat_t g_renameat = nullptr;
 unlink_t g_unlink = nullptr;
@@ -1181,6 +1183,40 @@ void *proxy_dlopen(const char *filename, int flags) {
     return prev(filename, flags);
 }
 
+using tls_boot_t = void *(*)(void *);
+
+tls_boot_t boot_tls_get_addr() {
+    static tls_boot_t function = [] {
+        void *handle = dlopen("libshield_boot.so", RTLD_NOW | RTLD_NOLOAD);
+        if (handle != nullptr) {
+            auto found = reinterpret_cast<tls_boot_t>(
+                    dlsym(handle, "fm_tls_get_addr"));
+            if (found != nullptr) {
+                return found;
+            }
+        }
+        return reinterpret_cast<tls_boot_t>(
+                dlsym(RTLD_DEFAULT, "fm_tls_get_addr"));
+    }();
+    return function;
+}
+
+void *proxy_tls_get_addr(void *index) {
+    FM_HOOK_SCOPE();
+    auto prev = (tls_get_addr_t) fm_prev((void *) &proxy_tls_get_addr);
+    if (prev == nullptr) {
+        return nullptr;
+    }
+    tls_boot_t custom = boot_tls_get_addr();
+    if (custom != nullptr) {
+        void *value = custom(index);
+        if (value != nullptr) {
+            return value;
+        }
+    }
+    return prev(index);
+}
+
 void *proxy_loader_dlopen(const char *filename, int flags, const void *caller) {
     FM_HOOK_SCOPE();
     auto prev = (loader_dlopen_t) fm_prev(
@@ -1606,6 +1642,8 @@ void install() {
     hook("unlinkat", reinterpret_cast<void *>(&proxy_unlinkat), &g_unlinkat);
     hook("truncate", reinterpret_cast<void *>(&proxy_truncate), &g_truncate);
     hook("ftruncate", reinterpret_cast<void *>(&proxy_ftruncate), &g_ftruncate);
+    hook("__tls_get_addr",
+         reinterpret_cast<void *>(&proxy_tls_get_addr), &g_tls_get_addr);
     hook("mmap", reinterpret_cast<void *>(&proxy_mmap), &g_mmap);
     hook("mmap64", reinterpret_cast<void *>(&proxy_mmap64), &g_mmap64);
     hook("munmap", reinterpret_cast<void *>(&proxy_munmap), &g_munmap);

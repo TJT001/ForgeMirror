@@ -1,5 +1,60 @@
 #include "forgemirror/elf_loader.h"
 
+#include "tls_runtime.h"
+
+#ifndef R_AARCH64_TLS_DTPMOD64
+#define R_AARCH64_TLS_DTPMOD64 1028
+#endif
+#ifndef R_AARCH64_TLS_DTPREL64
+#define R_AARCH64_TLS_DTPREL64 1029
+#endif
+#ifndef R_AARCH64_TLS_TPREL64
+#define R_AARCH64_TLS_TPREL64 1030
+#endif
+#ifndef R_AARCH64_TLSDESC
+#define R_AARCH64_TLSDESC 1031
+#endif
+#ifndef R_X86_64_DTPMOD64
+#define R_X86_64_DTPMOD64 16
+#endif
+#ifndef R_X86_64_DTPOFF64
+#define R_X86_64_DTPOFF64 17
+#endif
+#ifndef R_X86_64_TPOFF64
+#define R_X86_64_TPOFF64 18
+#endif
+#ifndef R_X86_64_TLSGD
+#define R_X86_64_TLSGD 19
+#endif
+#ifndef R_X86_64_TLSLD
+#define R_X86_64_TLSLD 20
+#endif
+#ifndef R_X86_64_GOTTPOFF
+#define R_X86_64_GOTTPOFF 22
+#endif
+#ifndef R_X86_64_TLSDESC
+#define R_X86_64_TLSDESC 36
+#endif
+#ifndef R_ARM_TLS_DTPMOD32
+#define R_ARM_TLS_DTPMOD32 17
+#endif
+#ifndef R_ARM_TLS_DTPOFF32
+#define R_ARM_TLS_DTPOFF32 18
+#endif
+#ifndef R_ARM_TLS_TPOFF32
+#define R_ARM_TLS_TPOFF32 19
+#endif
+#ifndef R_386_TLS_DTPMOD32
+#define R_386_TLS_DTPMOD32 35
+#endif
+#ifndef R_386_TLS_DTPOFF32
+#define R_386_TLS_DTPOFF32 36
+#endif
+#ifndef R_386_TLS_TPOFF
+#define R_386_TLS_TPOFF 14
+#endif
+
+
 #include <android/log.h>
 #include <dlfcn.h>
 #include <elf.h>
@@ -31,6 +86,8 @@ struct Image {
     std::vector<SegmentInfo> segments;
     uintptr_t relroAddress = 0;
     size_t relroSize = 0;
+    uintptr_t tlsModule = 0;
+    std::vector<FmTlsIndex *> tlsIndexes;
 };
 
 namespace {
@@ -166,6 +223,9 @@ void *resolveSymbol(Image *image, uint32_t index, const char *name) {
     if (name == nullptr || name[0] == '\0') {
         return nullptr;
     }
+    if (name != nullptr && std::strcmp(name, "__tls_get_addr") == 0) {
+        return reinterpret_cast<void *>(&fm_tls_get_addr_entry);
+    }
     if (index < image->symbolCount) {
         const ElfW(Sym) &symbol = image->symbols[index];
         if (symbol.st_shndx != SHN_UNDEF) {
@@ -183,6 +243,15 @@ void *resolveSymbol(Image *image, uint32_t index, const char *name) {
         }
     }
     return dlsym(RTLD_DEFAULT, name);
+}
+
+bool tlsOffset(const ElfW(Sym) &symbol, intptr_t addend, uintptr_t *value) {
+    if (symbol.st_shndx == SHN_UNDEF
+            || ELF64_ST_TYPE(symbol.st_info) != STT_TLS) {
+        return false;
+    }
+    *value = static_cast<uintptr_t>(symbol.st_value + addend);
+    return true;
 }
 
 bool applyRelocation(Image *image, uintptr_t base, uint32_t symbolIndex,
@@ -223,6 +292,46 @@ bool applyRelocation(Image *image, uintptr_t base, uint32_t symbolIndex,
             *reinterpret_cast<uintptr_t *>(target) =
                     reinterpret_cast<uintptr_t>(resolved);
             return true;
+#ifdef R_AARCH64_TLS_DTPMOD64
+        case R_AARCH64_TLS_DTPMOD64:
+            if (image->tlsModule == 0
+                    || (symbolIndex != 0 && symbol.st_shndx == SHN_UNDEF)) {
+                __android_log_print(ANDROID_LOG_WARN, kTag,
+                                    "TLS module relocation failed in %s",
+                                    image->name.c_str());
+                return false;
+            }
+            *reinterpret_cast<uintptr_t *>(target) = image->tlsModule;
+            return true;
+        case R_AARCH64_TLS_DTPREL64: {
+            uintptr_t value = 0;
+            if (!tlsOffset(symbol, addend, &value)) {
+                __android_log_print(ANDROID_LOG_WARN, kTag,
+                                    "TLS offset failed in %s: %s",
+                                    image->name.c_str(), name);
+                return false;
+            }
+            *reinterpret_cast<uintptr_t *>(target) = value;
+            return true;
+        }
+        case R_AARCH64_TLS_TPREL64:
+            return false;
+#ifdef R_AARCH64_TLSDESC
+        case R_AARCH64_TLSDESC: {
+            uintptr_t offset = 0;
+            if (!tlsOffset(symbol, addend, &offset)) {
+                return false;
+            }
+            auto *index = new FmTlsIndex{image->tlsModule, offset};
+            image->tlsIndexes.push_back(index);
+            auto *descriptor = reinterpret_cast<FmTlsDesc *>(target);
+            descriptor->resolver =
+                    reinterpret_cast<void *>(&fm_tlsdesc_resolve);
+            descriptor->argument = index;
+            return true;
+        }
+#endif
+#endif
         case R_AARCH64_IRELATIVE:
             *reinterpret_cast<uintptr_t *>(target) =
                     reinterpret_cast<uintptr_t>(
@@ -260,6 +369,35 @@ bool applyRelocation(Image *image, uintptr_t base, uint32_t symbolIndex,
             *reinterpret_cast<uintptr_t *>(target) =
                     reinterpret_cast<uintptr_t>(resolved);
             return true;
+#ifdef R_X86_64_DTPMOD64
+        case R_X86_64_DTPMOD64:
+            if (image->tlsModule == 0
+                    || (symbolIndex != 0 && symbol.st_shndx == SHN_UNDEF)) {
+                __android_log_print(ANDROID_LOG_WARN, kTag,
+                                    "TLS module relocation failed in %s",
+                                    image->name.c_str());
+                return false;
+            }
+            *reinterpret_cast<uintptr_t *>(target) = image->tlsModule;
+            return true;
+        case R_X86_64_DTPOFF64: {
+            uintptr_t value = 0;
+            if (!tlsOffset(symbol, addend, &value)) {
+                __android_log_print(ANDROID_LOG_WARN, kTag,
+                                    "TLS offset failed in %s: %s",
+                                    image->name.c_str(), name);
+                return false;
+            }
+            *reinterpret_cast<uintptr_t *>(target) = value;
+            return true;
+        }
+        case R_X86_64_TPOFF64:
+        case R_X86_64_GOTTPOFF:
+        case R_X86_64_TLSGD:
+        case R_X86_64_TLSLD:
+        case R_X86_64_TLSDESC:
+            return false;
+#endif
         case R_X86_64_IRELATIVE:
             *reinterpret_cast<uintptr_t *>(target) =
                     reinterpret_cast<uintptr_t>(
@@ -297,6 +435,33 @@ bool applyRelocation(Image *image, uintptr_t base, uint32_t symbolIndex,
             *reinterpret_cast<uintptr_t *>(target) =
                     reinterpret_cast<uintptr_t>(resolved);
             return true;
+#ifdef R_ARM_TLS_DTPMOD32
+        case R_ARM_TLS_DTPMOD32:
+            if (image->tlsModule == 0
+                    || (symbolIndex != 0 && symbol.st_shndx == SHN_UNDEF)) {
+                __android_log_print(ANDROID_LOG_WARN, kTag,
+                                    "TLS module relocation failed in %s",
+                                    image->name.c_str());
+                return false;
+            }
+            *reinterpret_cast<uint32_t *>(target) =
+                    static_cast<uint32_t>(image->tlsModule);
+            return true;
+        case R_ARM_TLS_DTPOFF32: {
+            uintptr_t value = 0;
+            if (!tlsOffset(symbol, addend, &value)) {
+                __android_log_print(ANDROID_LOG_WARN, kTag,
+                                    "TLS offset failed in %s: %s",
+                                    image->name.c_str(), name);
+                return false;
+            }
+            *reinterpret_cast<uint32_t *>(target) =
+                    static_cast<uint32_t>(value);
+            return true;
+        }
+        case R_ARM_TLS_TPOFF32:
+            return false;
+#endif
         case R_ARM_IRELATIVE:
             *reinterpret_cast<uintptr_t *>(target) =
                     reinterpret_cast<uintptr_t>(
@@ -334,6 +499,33 @@ bool applyRelocation(Image *image, uintptr_t base, uint32_t symbolIndex,
             *reinterpret_cast<uintptr_t *>(target) =
                     reinterpret_cast<uintptr_t>(resolved);
             return true;
+#ifdef R_386_TLS_DTPMOD32
+        case R_386_TLS_DTPMOD32:
+            if (image->tlsModule == 0
+                    || (symbolIndex != 0 && symbol.st_shndx == SHN_UNDEF)) {
+                __android_log_print(ANDROID_LOG_WARN, kTag,
+                                    "TLS module relocation failed in %s",
+                                    image->name.c_str());
+                return false;
+            }
+            *reinterpret_cast<uint32_t *>(target) =
+                    static_cast<uint32_t>(image->tlsModule);
+            return true;
+        case R_386_TLS_DTPOFF32: {
+            uintptr_t value = 0;
+            if (!tlsOffset(symbol, addend, &value)) {
+                __android_log_print(ANDROID_LOG_WARN, kTag,
+                                    "TLS offset failed in %s: %s",
+                                    image->name.c_str(), name);
+                return false;
+            }
+            *reinterpret_cast<uint32_t *>(target) =
+                    static_cast<uint32_t>(value);
+            return true;
+        }
+        case R_386_TLS_TPOFF:
+            return false;
+#endif
         case R_386_IRELATIVE:
             *reinterpret_cast<uintptr_t *>(target) =
                     reinterpret_cast<uintptr_t>(
@@ -528,6 +720,28 @@ Image *load(const uint8_t *data, size_t size, const char *name) {
         delete image;
         return nullptr;
     }
+    for (int index = 0; index < header->e_phnum; index++) {
+        const ElfW(Phdr) &program = programs[index];
+        if (program.p_type != PT_TLS || program.p_memsz == 0) {
+            continue;
+        }
+        if (program.p_offset + program.p_filesz > size) {
+            munmap(base, mappedSize);
+            delete image;
+            return nullptr;
+        }
+        image->tlsModule = fm_tls_register(
+                program.p_memsz, program.p_align,
+                data + program.p_offset, program.p_filesz);
+        if (image->tlsModule == 0) {
+            __android_log_print(ANDROID_LOG_WARN, kTag,
+                                "TLS register failed in %s", image->name.c_str());
+            munmap(base, mappedSize);
+            delete image;
+            return nullptr;
+        }
+    }
+
     if (!configureSymbols(image, dynamic, baseAddress)) {
         munmap(base, mappedSize);
         delete image;
@@ -638,6 +852,10 @@ void close(Image *image) {
     if (image == nullptr) {
         return;
     }
+    for (FmTlsIndex *index : image->tlsIndexes) {
+        delete index;
+    }
+    image->tlsIndexes.clear();
     {
         std::lock_guard<std::mutex> guard(gImagesLock);
         gImages.erase(std::remove(gImages.begin(), gImages.end(), image),

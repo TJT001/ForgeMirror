@@ -63,7 +63,7 @@ Demo harness 的 `firstFrameMs` 包含 3 秒探针 sleep，不计入基线。
 | 锁语义 | `flock/fcntl` 已映射到真实目标 lock fd；同进程 POSIX fcntl 仍按内核语义不互斥 | 不覆盖直接 `svc`/`io_uring`；不与内部 `.lock` 声称互通 |
 | 系统调用 | 内联 `svc`、`io_uring` 未覆盖；`openat2.resolve` 未模拟 | 直接 syscall 可绕过透明 I/O |
 | ABI | ARM32 已在 Pixel 5/API 30 验证；x86_64 完成 16 KB 构建/gate/loader 主机模拟和 Dobby 后端构建，但无运行镜像；x86 仅编译 | x86/x86_64 透明 I/O/block 未运行时验证；x86_64 使用 Dobby |
-| 加载器 | 自研 ELF64/ELF32 loader（PT_LOAD/RELA/REL/RELR/DT_PLTREL/符号/GNU hash/INIT/RELRO/IRELATIVE/COPY）、DT_NEEDED 预加载与平台兜底、依赖 JNI_OnLoad、dlopen 重定向、唯一占位库、fail-closed 回退、safejni | TLS relocation、x86 真机未覆盖；JNI_OnLoad/dlopen 回退有短暂明文窗口 |
+| 加载器 | 自研 ELF64/ELF32 loader（PT_LOAD/RELA/REL/RELR/DT_PLTREL/符号/GNU hash/INIT/RELRO/IRELATIVE/COPY）、动态 TLS（DTPMOD/DTPREL/TLSDESC）、DT_NEEDED 预加载与平台兜底、依赖 JNI_OnLoad、dlopen 重定向、唯一占位库、fail-closed 回退、safejni | 静态 TLS（TPREL/GOTTPOFF/TLSGD/TLSLD）仍回退；TLS 设备矩阵未覆盖；JNI_OnLoad/dlopen 回退有短暂明文窗口 |
 | ART | 适配器为空实现；直接 hook `ClassLinker::VerifyClass` 返回 true 在 API 30 触发 ART SIGABRT，已回退 | 需要安全的 class status 方案；当前无绕过证据，符合 C4 |
 | 构建 | split APK 与 AAB split/universal 已支持；16 KB ELF/APK 对齐与 S8 校验已接入并在 ps16k 镜像验证；增量升级、按设备多 spec 共享优化仍未覆盖 | 见 `2026-11-21-P2-split-aab.md`、`2026-11-21-P2-16kb.md` |
 | 设备 | API 26–28、31+、国产 ROM 未覆盖 | G1 矩阵不足 |
