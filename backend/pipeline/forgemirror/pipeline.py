@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .apk import parse_badging
 from .dex_stage import run_dex_stage
+from .progress import emit as emit_progress
 from .intake import run_intake
 from .inventory import run_inventory
 from .tools import AndroidTools, ToolError
@@ -30,6 +31,7 @@ class BuildOptions:
     bundletool: Path | None = None
     aab_mode: str = "universal"
     device_spec: Path | None = None
+    progress_file: Path | None = None
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -40,12 +42,15 @@ def run_build(options: BuildOptions, tools: AndroidTools) -> dict:
     build_id = options.build_id or str(uuid.uuid4())
     out_dir = Path(options.out) if options.out is not None else Path("artifacts") / build_id
     out_dir.mkdir(parents=True, exist_ok=True)
+    emit_progress(options.progress_file, "s0", "running", 5, "准入检查")
 
     apk = Path(options.apk)
     splits = [Path(item) for item in (options.splits or [])]
     bundled = apk.suffix.lower() == ".aab"
     if bundled:
         if options.splits:
+            emit_progress(options.progress_file, "s0", "failed", 5,
+                          "AAB 不能与 split 同时使用")
             return {
                 "ok": False,
                 "stage": "s0",
@@ -55,6 +60,8 @@ def run_build(options: BuildOptions, tools: AndroidTools) -> dict:
                 "warnings": ["--split cannot be combined with .aab input"],
             }
         if options.aab_mode not in ("universal", "split"):
+            emit_progress(options.progress_file, "s0", "failed", 5,
+                          f"不支持的 AAB 模式：{options.aab_mode}")
             return {
                 "ok": False,
                 "stage": "s0",
@@ -85,6 +92,7 @@ def run_build(options: BuildOptions, tools: AndroidTools) -> dict:
                 )
         except ToolError as error:
             code = "E_BUNDLETOOL_MISSING" if "bundletool not found" in str(error) else "E_AAB_INVALID"
+            emit_progress(options.progress_file, "s0", "failed", 5, str(error))
             return {
                 "ok": False,
                 "stage": "s0",
@@ -106,6 +114,8 @@ def run_build(options: BuildOptions, tools: AndroidTools) -> dict:
     )
     _write_json(out_dir / "intake.json", intake.model_dump(mode="json", by_alias=True))
     if not intake.ok:
+        emit_progress(options.progress_file, "s0", "failed", 5,
+                      "准入失败：" + ",".join(intake.reason_codes))
         return {
             "ok": False,
             "stage": "s0",
@@ -115,12 +125,16 @@ def run_build(options: BuildOptions, tools: AndroidTools) -> dict:
             "warnings": intake.warnings,
         }
 
+    emit_progress(options.progress_file, "s0", "done", 12, "准入通过")
+    emit_progress(options.progress_file, "s1", "running", 14, "资产清点")
     inventory = run_inventory(
         apk, tools=tools, shell_version=options.shell_version,
         splits=splits,
     )
     _write_json(out_dir / "inventory.json", inventory.model_dump(mode="json", by_alias=True))
 
+    emit_progress(options.progress_file, "s1", "done", 24, "清单完成")
+    emit_progress(options.progress_file, "s2", "running", 26, "写入 FDX2 容器")
     split_apks = {
         name: path
         for name, path in zip(intake.split_names, splits)
@@ -143,6 +157,7 @@ def run_build(options: BuildOptions, tools: AndroidTools) -> dict:
         )
     artifacts.sort(key=lambda item: item["path"])
 
+    emit_progress(options.progress_file, "s2", "done", 35, "容器写入完成")
     build_meta = {
         "schema": "forgemirror.build.meta/1",
         "build_id": build_id,

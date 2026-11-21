@@ -240,29 +240,67 @@ def package_result(work_dir: Path) -> tuple[Path | None, str | None, int | None,
             bool(gate.get("passed")))
 
 
-def run_pipeline(task: dict) -> tuple[bool, str | None, str | None, dict]:
+def _progress_reader(conn: psycopg.Connection, task: dict, path):
+    seen = 0
+    sequence = 10
+
+    def drain() -> int:
+        nonlocal seen, sequence
+        if not path.exists():
+            return sequence
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return sequence
+        for line in lines[seen:]:
+            seen += 1
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            add_event(conn, task, sequence, stage=item.get("stage"),
+                      status=item.get("status"), progress=item.get("progress"),
+                      message=item.get("message"))
+            sequence += 1
+        return sequence
+
+    return drain
+
+
+def run_pipeline(task: dict) -> tuple[bool, str | None, str | None, dict, int]:
     work_dir = DATA_DIR / "works" / str(task["id"])
     work_dir.mkdir(parents=True, exist_ok=True)
+    progress_path = work_dir / "progress.jsonl"
+    progress_path.unlink(missing_ok=True)
     command = build_protect_command(task)
+    command.extend(["--progress-file", str(progress_path)])
     env = dict(os.environ)
     env["PYTHONPATH"] = str(PIPELINE)
     process = subprocess.Popen(
         command, cwd=str(ROOT), env=env,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
-    last_heartbeat = time.time()
-    while process.poll() is None:
-        time.sleep(0.5)
-        if time.time() - last_heartbeat >= 10:
-            conn = connect()
-            try:
-                if heartbeat(conn, task):
-                    process.terminate()
-                    break
-            finally:
-                conn.close()
-            last_heartbeat = time.time()
-    stdout, stderr = process.communicate()
+    events = connect()
+    drain = _progress_reader(events, task, progress_path)
+    sequence = 10
+    try:
+        last_heartbeat = time.time()
+        while process.poll() is None:
+            sequence = drain()
+            time.sleep(0.5)
+            if time.time() - last_heartbeat >= 10:
+                conn = connect()
+                try:
+                    if heartbeat(conn, task):
+                        process.terminate()
+                        break
+                finally:
+                    conn.close()
+                last_heartbeat = time.time()
+        sequence = drain()
+        stdout, stderr = process.communicate()
+    finally:
+        events.close()
 
     result, package, version_code, gate_passed = package_result(work_dir)
     summary = {
@@ -285,8 +323,8 @@ def run_pipeline(task: dict) -> tuple[bool, str | None, str | None, dict]:
             except Exception:
                 pass
         detail = (stderr or stdout or "").strip()
-        return False, reason, detail[-2000:] or None, summary
-    return True, None, None, summary
+        return False, reason, detail[-2000:] or None, summary, sequence
+    return True, None, None, summary, sequence
 
 
 def main() -> None:
@@ -301,12 +339,11 @@ def main() -> None:
             print(f"claimed {task['id']} attempt={task['attempt']}", flush=True)
             add_event(conn, task, 1, stage="queue", status="running", progress=5,
                       message="claimed by worker")
-            add_event(conn, task, 2, stage="s0-s8", status="running", progress=40,
-                      message="running protect pipeline")
 
-            ok, reason, detail, summary = run_pipeline(task)
+            ok, reason, detail, summary, sequence = run_pipeline(task)
             if ok:
-                add_event(conn, task, 3, stage="done", status="succeeded", progress=100,
+                add_event(conn, task, sequence, stage="done", status="succeeded",
+                          progress=100,
                           message=f"protected apk {summary.get('sha256')}")
                 conn.execute(
                     """
@@ -321,8 +358,8 @@ def main() -> None:
                 )
                 print(f"succeeded {task['id']}", flush=True)
             else:
-                add_event(conn, task, 3, stage="failed", status="failed", progress=100,
-                          reason=reason, message=detail)
+                add_event(conn, task, sequence, stage="failed", status="failed",
+                          progress=100, reason=reason, message=detail)
                 if task["attempt"] < task["max_attempts"]:
                     conn.execute(
                         """

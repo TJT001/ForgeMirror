@@ -75,7 +75,22 @@ const embeddedKey = computed({
     noKeyAsset.value = !value
   },
 })
-const recentEvents = computed(() => [...events.value].reverse().slice(0, 10))
+const stageLabels: Record<string, string> = {
+  queue: '队列',
+  s0: 'S0 准入',
+  s1: 'S1 清点',
+  s2: 'S2 容器',
+  s3: 'S3 策略',
+  s4: 'S4 授权',
+  s5: 'S5 Native',
+  s6: 'S6 注入',
+  s7: 'S7 签名',
+  s8: 'S8 闸门',
+  done: '完成',
+  failed: '失败',
+}
+const stageLabel = (stage?: string) => (stage ? stageLabels[stage] ?? stage : 'pipeline')
+const recentEvents = computed(() => events.value.slice(-24))
 const selectedLibs = computed(() =>
   inMemoryLibs.value.split(',').map((value) => value.trim()).filter(Boolean),
 )
@@ -358,7 +373,7 @@ async function cancel() {
           <ol v-if="recentEvents.length" class="ledger">
             <li v-for="event in recentEvents" :key="event.id">
               <span class="ledger-seq">#{{ event.sequence }}</span>
-              <span class="ledger-stage">{{ event.stage ?? 'pipeline' }}</span>
+              <span class="ledger-stage">{{ stageLabel(event.stage) }}</span>
               <span class="ledger-msg">{{ event.message ?? event.reason_code ?? event.status }}</span>
             </li>
           </ol>

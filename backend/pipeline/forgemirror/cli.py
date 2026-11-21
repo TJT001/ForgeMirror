@@ -19,6 +19,7 @@ from .formats.file import (
     migrate as migrate_encrypted_file,
     migrate_rc4 as migrate_rc4_file,
 )
+from .progress import emit as emit_progress
 from .pipeline import BuildOptions, run_build
 from .protect import ProtectOptions, protect
 from .tools import AndroidTools, ToolError
@@ -221,6 +222,9 @@ def protect_apk(
                                            min=1, max=4096),
     whitebox: bool = typer.Option(False, "--whitebox-key/--no-whitebox-key",
                                   help="Wrap the embedded content key with the white-box AES vault."),
+    progress_file: Path | None = typer.Option(
+        None, "--progress-file", dir_okay=False,
+        help="Append stage progress as JSON lines for the worker event stream."),
     key_dir: Path = typer.Option(Path("artifacts/keys"), "--key-dir"),
     content_key: Path | None = typer.Option(
         None, "--key-file", exists=True, dir_okay=False, readable=True,
@@ -297,6 +301,7 @@ def protect_apk(
                 bundletool=bundletool,
                 aab_mode=aab_mode,
                 device_spec=spec,
+                progress_file=progress_file,
             ),
             tools,
         )
@@ -335,6 +340,7 @@ def protect_apk(
                 whitebox=whitebox,
                 alg=alg,
                 splits=effective_splits,
+                progress_file=progress_file,
             ),
             tools,
         )
@@ -342,9 +348,13 @@ def protect_apk(
         split_dir = base_out.with_name(base_out.stem + "_splits")
         split_paths = [split_dir / item["file"]
                        for item in result.get("splits", [])]
+        emit_progress(progress_file, "s8", "running", 90, "校验闸门")
         gate = run_gate(base_out, container, key_file.read_bytes(),
                         splits=split_paths)
         gate = _attach_page_checks(gate, tools, [base_out, *split_paths])
+        emit_progress(progress_file, "s8",
+                      "done" if gate["passed"] else "failed", 98,
+                      "闸门通过" if gate["passed"] else "闸门未通过")
         (work_dir / "gate.json").write_text(
             json.dumps(gate, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
         )

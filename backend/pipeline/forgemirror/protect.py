@@ -25,6 +25,7 @@ from .formats.container import open_container
 from .formats.policy import pack_policy
 from .formats.rules import pack_rules
 from .formats.whitebox import export_table, wrap as wrap_whitebox
+from .progress import emit as emit_progress
 from .formats.yara_rules import RUNTIME_RULES
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -123,6 +124,7 @@ class ProtectOptions:
     response: str = "toast"
     max_native_file_mb: int = 128
     whitebox: bool = False
+    progress_file: Path | None = None
 
 
 def _stub_from_aar(aar: Path, tools: AndroidTools, tmp: Path) -> tuple[bytes, dict[str, bytes]]:
@@ -277,6 +279,25 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
     der = public_der(signing_key)
     policy_alg = "ecdsa-p256-sha256-raw" if options.alg == "ecdsa-p256-sha256" else options.alg
 
+    emit_progress(options.progress_file, "s3", "running", 36, "打包策略与规则")
+    policy_pkg = pack_policy(
+        DEFAULT_POLICY,
+        k_content=k_content,
+        build_id=uuid.UUID(options.build_id).bytes,
+        private_key=signing_key,
+        alg=policy_alg,
+    )
+    rules_pkg = pack_rules(
+        DEFAULT_RULES,
+        k_content=k_content,
+        build_id=uuid.UUID(options.build_id).bytes,
+        private_key=signing_key,
+        alg=policy_alg,
+    )
+    emit_progress(options.progress_file, "s3", "done", 45, "策略与规则完成")
+    emit_progress(options.progress_file, "s4", "skipped", 45,
+                  "S4 授权链不在当前离线保护范围")
+
     options.out.parent.mkdir(parents=True, exist_ok=True)
     warnings: list[str] = list(alignment_warnings)
     if raised_min_sdk is not None and raised_min_sdk < 26:
@@ -293,6 +314,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             "W_CERT_FALLBACK: could not read debug keystore; pinning the "
             "input APK certificate"
         )
+    emit_progress(options.progress_file, "s5", "running", 46, "native 库处理")
     with tempfile.TemporaryDirectory(prefix="fm-protect-") as tmp:
         tmp = Path(tmp)
         stub_dex, shield_libs = _stub_from_aar(options.aar, tools, tmp)
@@ -438,6 +460,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
         elif options.whitebox:
             warnings.append("W_WHITEBOX_IGNORED: --no-key-asset disables the vault")
 
+        emit_progress(options.progress_file, "s5", "done", 58, "native 库处理完成")
         config = {
             "schema": "forgemirror.shield.config/1",
             "original_application": original_application or "",
@@ -462,21 +485,6 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             "app_id": package,
             "build_salt": secrets.token_hex(16),
         }
-        policy_pkg = pack_policy(
-            DEFAULT_POLICY,
-            k_content=k_content,
-            build_id=uuid.UUID(options.build_id).bytes,
-            private_key=signing_key,
-            alg=policy_alg,
-        )
-        rules_pkg = pack_rules(
-            DEFAULT_RULES,
-            k_content=k_content,
-            build_id=uuid.UUID(options.build_id).bytes,
-            private_key=signing_key,
-            alg=policy_alg,
-        )
-
         entries = {
             "AndroidManifest.xml": rewritten_manifest,
             "classes.dex": stub_dex,
@@ -496,6 +504,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
         entries.update(core_assets)
         entries.update(native_assets)
 
+        emit_progress(options.progress_file, "s6", "running", 60, "注入与重打包")
         injected = tmp / "injected.apk"
         _rewrite_zip(options.apk, injected, entries, drop_libs)
 
@@ -527,6 +536,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
                 "sha256": sha256_file(target),
             })
 
+        emit_progress(options.progress_file, "s6", "done", 74, "重打包完成")
         fixed = {
             "classes.dex",
             "assets/container.fdx",
@@ -559,6 +569,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             payload["splits"] = split_outputs
         envelope = build_envelope(payload, signing_key, options.alg)
 
+        emit_progress(options.progress_file, "s7", "running", 76, "对齐与签名")
         with_manifest = tmp / "manifest.apk"
         inject(injected, with_manifest, {"assets/shield/manifest.sig": envelope})
         if options.signing_mode == "customer_local":
@@ -569,6 +580,8 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             tools.align_apk(with_manifest, aligned)
             tools.sign_debug(aligned, options.out)
             signed = True
+        emit_progress(options.progress_file, "s7", "done", 88,
+                      "签名完成" if signed else "对齐完成")
 
         if split_outputs:
             set_manifest = {
