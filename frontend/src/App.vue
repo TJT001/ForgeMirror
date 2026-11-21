@@ -780,10 +780,10 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .stage { padding: 36px 42px 80px; min-width: 0; }
 .hero { max-width: 720px; margin-bottom: 32px; }
 .hero h2 {
-  margin: 0 0 10px;
-  font-size: clamp(34px, 4.2vw, 56px);
-  line-height: 0.98;
-  letter-spacing: -0.045em;
+  margin: 0 0 9px;
+  font-size: clamp(24px, 2.4vw, 32px);
+  line-height: 1.08;
+  letter-spacing: -0.032em;
   font-weight: 600;
 }
 .hero p { margin: 0; max-width: 62ch; color: var(--ink-soft); font-size: 14px; line-height: 1.7; }
@@ -948,7 +948,7 @@ td.mono { font-family: var(--mono); font-size: 10px; color: var(--ink-soft); }
   .topbar-meta { font-size: 10px; }
   .rail { display: block; padding: 24px 20px; }
   .stage { padding: 26px 18px 60px; }
-  .hero h2 { font-size: 38px; }
+  .hero h2 { font-size: 27px; }
   .dropgrid, .field-grid, .matrix { grid-template-columns: 1fr; }
   .field.wide { grid-column: auto; }
   .block-head { display: block; }
