@@ -49,10 +49,14 @@ std::mutex gImagesLock;
 std::vector<Image *> gImages;
 
 size_t pageSize() {
+#if defined(FM_ELF_TEST_PAGE_SIZE)
+    static constexpr size_t value = FM_ELF_TEST_PAGE_SIZE;
+#else
     static size_t value = [] {
         long result = sysconf(_SC_PAGESIZE);
         return result > 0 ? static_cast<size_t>(result) : 4096u;
     }();
+#endif
     return value;
 }
 

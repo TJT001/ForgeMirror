@@ -190,6 +190,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
         raise SystemExit("duplicate split names")
 
     sources = [options.apk, *options.splits]
+    input_abis: set[str] = set()
     alignment_warnings: list[str] = []
     for source in sources:
         with zipfile.ZipFile(source) as archive:
@@ -200,6 +201,7 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
                 if len(parts) < 3:
                     continue
                 expected = "armeabi-v7a" if parts[1] == "armeabi" else parts[1]
+                input_abis.add(expected)
                 payload = archive.read(info.filename)
                 arch = elf_arch(payload[:20])
                 if arch != expected:
@@ -270,6 +272,11 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
     with tempfile.TemporaryDirectory(prefix="fm-protect-") as tmp:
         tmp = Path(tmp)
         stub_dex, shield_libs = _stub_from_aar(options.aar, tools, tmp)
+        shield_libs = {
+            name: data for name, data in shield_libs.items()
+            if (("armeabi-v7a" if name.split("/")[1] == "armeabi"
+                 else name.split("/")[1]) in input_abis)
+        }
         core_libs = {name for name in shield_libs
                      if name.endswith("/libshield_core.so")}
         drop_libs: set[str] = set()
