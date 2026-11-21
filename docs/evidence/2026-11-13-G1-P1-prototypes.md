@@ -32,14 +32,16 @@
 | 设备/环境 | API/ABI | 结果 | 证据 |
 |---|---|---|---|
 | Pixel 5 | 30 / arm64-v8a | 通过 | demo 探针、v2rayNG 2.4.0、DT_INIT LZSS、诱饵、透明 I/O |
-| Android 构建 | x86 / x86_64 | 仅编译通过 | ShadowHook/x86 原生 hook 未运行验证 |
+| Android 构建 | x86 | 仅编译通过 | 无 x86 32 位运行镜像 |
+| Android 构建 | x86_64 | 构建/gate 通过 | Dobby 静态后端；16 KB/APK/AAB gate 通过；无 x86_64 运行镜像 |
 | Pixel 5 | API 30 / armeabi-v7a | 通过 | 强制 32 位安装；ELF32 自研 loader、hook、dlopen 重定向、探针全通过 |
 | API 26–28 | — | 未验证 | `ShieldInstrumentation` 路径未经真机 |
 | API 37（Android 16） | arm64-v8a 模拟器 | 通过 | 默认保护/内存库探针全通过；`2026-11-14-P1-api37-hooks.md` |
 | API 37 16 KB 页 | arm64-v8a 模拟器 | 通过 | `PAGE_SIZE=16384`；单 APK 与 AAB split 探针全通过；`2026-11-21-P2-16kb.md` |
 | x86_64 16 KB | 构建/主机模拟 | 部分 | ELF/APK/AAB split 16 KB gate 通过；Dobby 静态后端编入 `libshield_hook`；Rosetta 下 loader 16 KB 模拟执行通过；无 x86_64 Android 运行镜像 |
+| 宿主 TLS | macOS arm64 / 16 KB | 通过 | x86_64 DTPMOD/DTPOFF 与 arm64 TLSDESC；同线程递增、跨线程独立；`2026-11-21-P2-tls-relocation.md` |
 
-结论：**已覆盖 Pixel 5 API 30（arm64 + armeabi-v7a）与 API 37 arm64 模拟器；API 26–28、x86/x86_64、国产 ROM 仍未覆盖。**
+结论：**已覆盖 Pixel 5 API 30（arm64 + armeabi-v7a）与 API 37 arm64/16 KB 模拟器；x86_64 完成构建与 host/gate 验证但无运行镜像；API 26–28、x86、国产 ROM 仍未覆盖。**
 
 ## 启动基线（Pixel 5 / API 30）
 
