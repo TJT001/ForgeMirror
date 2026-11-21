@@ -367,7 +367,10 @@ async function cancel() {
         <div v-if="artifactUrl" class="artifact">
           <span class="artifact-label">产物已封装</span>
           <a class="download" :href="artifactUrl">下载加固产物</a>
-          <p class="artifact-note">split/AAB 任务为 ZIP 集合，单 APK 为安装包。</p>
+          <p v-if="signingMode === 'customer_local'" class="artifact-note warn">
+            客户本地签名：产物只对齐、未签名，需用 apksigner 签名后再安装。
+          </p>
+          <p v-else class="artifact-note">split/AAB 任务为 ZIP 集合，单 APK 为安装包。</p>
         </div>
 
         <div class="ledger-wrap">
@@ -796,6 +799,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 .download:hover { color: #fff1e4; }
 .artifact-note { margin: 8px 0 0; color: #8b9a93; font-size: 10px; line-height: 1.45; }
+.artifact-note.warn { color: #c06a3e; }
 .ledger-wrap { margin-top: 28px; }
 .ledger { list-style: none; margin: 0; padding: 0; }
 .ledger li {
