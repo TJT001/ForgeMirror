@@ -354,7 +354,7 @@ async function cancel() {
         </div>
 
         <div class="ledger-wrap">
-          <p class="rail-label">事件账本</p>
+          <p class="rail-label">构建进度</p>
           <ol v-if="recentEvents.length" class="ledger">
             <li v-for="event in recentEvents" :key="event.id">
               <span class="ledger-seq">#{{ event.sequence }}</span>
@@ -362,7 +362,7 @@ async function cancel() {
               <span class="ledger-msg">{{ event.message ?? event.reason_code ?? event.status }}</span>
             </li>
           </ol>
-          <p v-else class="rail-empty">任务开始后，阶段与进度会在这里逐条出现。</p>
+          <p v-else class="rail-empty">开始加固后，各阶段与产物状态会在这里依次出现。</p>
         </div>
       </aside>
 
@@ -375,7 +375,7 @@ async function cancel() {
         <form @submit.prevent="upload">
           <section class="block">
             <div class="block-head">
-              <h3>输入与交付形态</h3>
+              <h3>输入与产物</h3>
               <p>主包是 APK 或 AAB。APK 可附加已有 split；AAB split 模式使用 device spec 生成分设备产物。</p>
             </div>
 
