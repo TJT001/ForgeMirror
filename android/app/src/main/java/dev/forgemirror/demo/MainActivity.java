@@ -120,7 +120,25 @@ public class MainActivity extends AppCompatActivity {
             return 0xFF16211F;
         }
         if (line.startsWith("        ·")) {
-            return 0xFF4B5853;
+            int dot = line.indexOf('·');
+            int equals = line.indexOf('=');
+            String kind = (dot >= 0 && equals > dot)
+                    ? line.substring(dot + 1, equals).trim() : "";
+            switch (kind) {
+                case "root":
+                case "debugger":
+                    return 0xFFB0472F;
+                case "hook":
+                case "usb":
+                    return 0xFF9A7540;
+                case "xposed":
+                case "injection":
+                case "frida":
+                case "unpacker":
+                    return 0xFFA8432C;
+                default:
+                    return 0xFF55615C;
+            }
         }
         return 0xFF16211F;
     }

@@ -14,6 +14,8 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStreamReader;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -131,6 +133,8 @@ final class ShieldDetect {
         scanKnownPaths(findings, seen);
         scanFridaPorts(findings, seen);
         scanFridaProcesses(findings, seen);
+        scanFridaSocket(findings, seen);
+        scanFridaFiles(findings, seen);
         scanHookMounts(findings, seen);
         scanYidun(context, findings, seen);
         return findings;
@@ -367,6 +371,33 @@ final class ShieldDetect {
                 }
             } catch (Exception ignored) {
                 // Permission denied for other UIDs.
+            }
+        }
+    }
+
+    private static void scanFridaSocket(List<Finding> findings, Set<String> seen) {
+        int[] ports = {27042, 27043};
+        for (int port : ports) {
+            try (Socket socket = new Socket()) {
+                socket.connect(new InetSocketAddress("127.0.0.1", port), 300);
+                add(findings, seen, "env_frida", "frida",
+                        "127.0.0.1:" + port, 0.9);
+            } catch (Exception ignored) {
+                // Not listening or blocked.
+            }
+        }
+    }
+
+    private static void scanFridaFiles(List<Finding> findings, Set<String> seen) {
+        File dir = new File("/data/local/tmp");
+        File[] entries = dir.listFiles();
+        if (entries == null) {
+            return;
+        }
+        for (File entry : entries) {
+            if (entry.getName().toLowerCase(Locale.US).startsWith("frida-server")) {
+                add(findings, seen, "env_frida", "frida",
+                        entry.getAbsolutePath(), 0.8);
             }
         }
     }
