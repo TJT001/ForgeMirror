@@ -76,7 +76,7 @@ assets/shield/wbaes.table  ──┼─> libshield_boot: 解包 -> K_content（�
    工具、不进 App。它隐藏的是根密钥的明文存储，不是完整的白盒 AES-GCM；
    运行时仍会在 native 内存短暂持有 `K_content`。
 2. native 代码可被 Frida/native hook 或内存 dump 分析；相比 Java 层显著抬高门槛，
-   但不是绝对防护。后续可接表随机化、表加密与 `mlock`。
+   但不是绝对防护。表随机化已实现；表加密与 `mlock` 仍是后续项。
 3. 构建期需要 JDK（`javac`/`java`），用于白盒包裹和 `WBX1` 导出；无 JDK 时
    白盒选项失败，不会退回明文。
 4. debug 变体 NDK 默认 `-O0`，`shield_boot` 显式加 `-O2`；否则纯 C 实现在
