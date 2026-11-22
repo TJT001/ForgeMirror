@@ -3,6 +3,8 @@ package dev.forgemirror.demo;
 import android.content.Intent;
 import android.database.Cursor;
 import android.os.Bundle;
+import android.text.SpannableStringBuilder;
+import android.text.style.ForegroundColorSpan;
 import android.util.Log;
 import android.widget.TextView;
 
@@ -84,8 +86,43 @@ public class MainActivity extends AppCompatActivity {
                 + nativeProbeDlopen() + " lockErr=" + lockErr
                 + " overload=" + nativeOverload("x") + "/" + nativeOverload(1);
         Log.i(TAG, "probe " + probe);
-        tv.setText(stringFromJNI() + "\n" + appStatus + "\n" + providerStatus
-                + "\n" + HarnessStorage.verify(this) + "\n" + probe);
+        SpannableStringBuilder out = new SpannableStringBuilder();
+        out.append(stringFromJNI()).append('\n')
+                .append(appStatus).append('\n')
+                .append(providerStatus).append('\n')
+                .append(HarnessStorage.verify(this)).append('\n')
+                .append(probe).append('\n');
+        appendLine(out, "== shield audit ==", 0xFF16211F);
+        for (String line : ShieldRuntime.auditSummary().split("\n", -1)) {
+            appendLine(out, line, colorFor(line));
+        }
+        tv.setText(out);
+    }
+
+    private static void appendLine(SpannableStringBuilder out, String line, int color) {
+        int start = out.length();
+        out.append(line).append('\n');
+        out.setSpan(new ForegroundColorSpan(color), start, out.length(),
+                SpannableStringBuilder.SPAN_EXCLUSIVE_EXCLUSIVE);
+    }
+
+    private static int colorFor(String line) {
+        if (line.startsWith("[✓]")) {
+            return 0xFF2E7D5A;
+        }
+        if (line.startsWith("[!]")) {
+            return 0xFF9A7540;
+        }
+        if (line.startsWith("[✗]")) {
+            return 0xFFB0472F;
+        }
+        if (line.startsWith("==")) {
+            return 0xFF16211F;
+        }
+        if (line.startsWith("        ·")) {
+            return 0xFF4B5853;
+        }
+        return 0xFF16211F;
     }
 
     private void startMergeProbe() {

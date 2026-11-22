@@ -41,6 +41,7 @@ final class ShieldDetect {
     private static final String[] PATH_UNPACKER = decode("2318e1c1a5e16e50323476ffd7a184");
     private static final String[] BUILD = decode("3d12fad4bc826b2f273209f5d7a79f7f203400eac1dca89d7d412963e1ccafba96726b220ae0a2b3809064333116fed4a7887048513572f2dda3886f4f300877e8d6ba92665e");
     private static final AtomicBoolean STARTED = new AtomicBoolean();
+    private static volatile List<Finding> lastFindings = new ArrayList<>();
     private static final AtomicBoolean DEBUGGER_REPORTED = new AtomicBoolean();
     private static volatile YidunSignatures pkr1Yidun;
 
@@ -71,6 +72,7 @@ final class ShieldDetect {
         }
         Thread thread = new Thread(() -> {
             List<Finding> findings = scan(context);
+            lastFindings = findings;
             if (findings.isEmpty()) {
                 Log.i(TAG, "no runtime findings");
                 return;
@@ -103,6 +105,18 @@ final class ShieldDetect {
         }, "shield-detect");
         thread.setDaemon(true);
         thread.start();
+    }
+
+    static List<String> summary() {
+        List<Finding> current = lastFindings;
+        if (current == null || current.isEmpty()) {
+            return new ArrayList<>(java.util.List.of("none"));
+        }
+        List<String> lines = new ArrayList<>();
+        for (Finding finding : current) {
+            lines.add(finding.kind + "=" + finding.ruleId + " (" + finding.evidence + ")");
+        }
+        return lines;
     }
 
     private static List<Finding> scan(Context context) {

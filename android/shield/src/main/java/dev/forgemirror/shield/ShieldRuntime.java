@@ -47,6 +47,7 @@ public final class ShieldRuntime {
     private static volatile byte[] fileKey;
     private static volatile byte[] nativeKey;
     private static volatile boolean ruleScanStarted;
+    private static volatile int ruleMatchCount;
     private static final Map<String, ShieldSharedPreferences> PREFS = new HashMap<>();
 
     static {
@@ -315,11 +316,92 @@ public final class ShieldRuntime {
                     Log.w(TAG, "event record failed: " + error);
                 }
             }
+            ruleMatchCount = matches.size();
             Log.i(TAG, "rule scan done matches=" + matches.size()
                     + " ms=" + (SystemClock.elapsedRealtime() - started));
         }, "shield-rule-scan");
         thread.setDaemon(true);
         thread.start();
+    }
+
+    public static int getRuleMatchCount() {
+        return ruleMatchCount;
+    }
+
+    public static String auditSummary() {
+        ShieldConfig active = config;
+        StringBuilder out = new StringBuilder();
+        out.append("== 壳与构建 ==\n");
+        boolean failed = state == STATE_RECOVERY;
+        out.append(mark(failed ? '✗' : (state >= STATE_APP_ATTACHED ? '✓' : '!'),
+                "运行阶段", stateName(state)
+                        + (failure.isEmpty() ? "" : " · " + failure)));
+        if (active != null) {
+            out.append(mark('✓', "壳版本", active.shellVersion));
+            out.append(mark('✓', "构建 ID", active.buildId));
+        }
+        out.append("== 保护层 ==\n");
+        if (active != null) {
+            String keyMode;
+            if (active.key == null || active.key.isEmpty()) {
+                keyMode = "授权服务";
+            } else if (active.key.endsWith(".wb")) {
+                keyMode = "白盒（native）";
+            } else {
+                keyMode = "内置明文";
+            }
+            out.append(mark('✓', "内容密钥", keyMode));
+            out.append(mark('✓', "核心库",
+                    active.core.isEmpty() ? "明文" : "已加密"));
+            out.append(mark(active.detection ? '✓' : '✗', "运行时检测",
+                    active.detection ? "开启" : "关闭"));
+            out.append(mark('✓', "处置策略", active.response));
+            out.append(mark('✓', "规则包", "v" + active.rulesVersion
+                    + " · cert " + (active.certSha256.isEmpty() ? "-"
+                            : active.certSha256.substring(0, 12))));
+        }
+        out.append(mark(ShieldNativeFileHook.installed() ? '✓' : '✗',
+                "Native Hook", ShieldNativeFileHook.installed() ? "已安装" : "不可用"));
+        out.append("== 加载 ==\n");
+        out.append(mark('✓', "内存 DEX", dexCount + " 个 · 解密 " + decryptMs + " ms"));
+        out.append(mark('✓', "ART 环境", ShieldArt.describe()));
+        out.append(mark('✓', "自研 Core", describe() + " · abi=" + abiVersion()));
+        out.append("== 检测结果 ==\n");
+        List<String> detections = ShieldDetect.summary();
+        boolean none = detections.size() == 1 && "none".equals(detections.get(0));
+        out.append(mark(none ? '✓' : '!', "运行时发现",
+                none ? "0 项" : detections.size() + " 项命中"));
+        if (!none) {
+            for (String item : detections) {
+                out.append("        · ").append(item).append('\n');
+            }
+        }
+        out.append(mark(ruleMatchCount > 0 ? '!' : '✓', "规则命中",
+                ruleMatchCount + " 条"));
+        return out.toString();
+    }
+
+    private static String mark(char status, String label, String value) {
+        return "[" + status + "] " + label + "  " + value + "\n";
+    }
+
+    private static String stateName(int value) {
+        switch (value) {
+            case STATE_VERIFIED:
+                return "verified";
+            case STATE_KEY_READY:
+                return "key-ready";
+            case STATE_DEX_READY:
+                return "dex-ready";
+            case STATE_APP_ATTACHED:
+                return "app-attached";
+            case STATE_RUNNING:
+                return "running";
+            case STATE_RECOVERY:
+                return "recovery";
+            default:
+                return "uninitialized";
+        }
     }
 
     public static void markRunning() {
