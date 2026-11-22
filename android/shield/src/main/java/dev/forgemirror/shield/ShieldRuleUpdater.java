@@ -136,6 +136,11 @@ final class ShieldRuleUpdater {
             case "yidun_vpn":
             case "yidun_mock_location":
             case "yidun_rom":
+            case "env_proxy":
+            case "env_packet_capture":
+            case "env_clone":
+            case "env_autotap":
+            case "env_screen_share":
                 return true;
             default:
                 return false;

@@ -26,6 +26,9 @@ final class ShieldResponse {
         }
         Set<String> toastKinds = new LinkedHashSet<>();
         for (ShieldDetect.Finding finding : findings) {
+            if ("context".equals(finding.kind)) {
+                continue;
+            }
             String selected = ShieldServerConfig.responseFor(
                     context, finding.ruleId, mode);
             Log.w(TAG, "response rule=" + finding.ruleId + " mode=" + selected);

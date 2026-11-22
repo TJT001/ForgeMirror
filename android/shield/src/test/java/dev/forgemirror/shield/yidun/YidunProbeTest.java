@@ -21,7 +21,7 @@ public final class YidunProbeTest {
     private static YidunSignatures signatures() {
         return new YidunSignatures(
                 "NetEase Yidun", "libnesec.so", "sha256",
-                "docs/research/libnesec_易盾加固还原.md", "2026-11-21",
+                "docs/research/libnesec_易盾加固还原.md", "2026-11-21", false,
                 list("/system/bin/su", "/system/xbin/su"),
                 list("magisk", "system_root"),
                 list("TracerPid:", "State:"), "(zombie)",
@@ -211,6 +211,45 @@ public final class YidunProbeTest {
     }
 
     @Test
+    public void candidatePlatformClassifiers() {
+        assertTrue(YidunProbe.hasProxyConfig("10.0.2.2", null, null, null));
+        assertTrue(YidunProbe.hasProxyConfig(null, null, null, "tun0"));
+        assertFalse(YidunProbe.hasProxyConfig(null, null, null, "wlan0"));
+        assertFalse(YidunProbe.hasProxyConfig(null, null, ":0", null));
+        assertFalse(YidunProbe.hasProxyConfig(null, null, "0", null));
+        assertFalse(YidunProbe.hasProxyConfig(null, null, "null", null));
+        assertTrue(YidunProbe.hasCaptureCaMarker("CN=mitmproxy, O=mitmproxy"));
+        assertFalse(YidunProbe.hasCaptureCaMarker("CN=Let's Encrypt"));
+
+        assertEquals(Arrays.asList("com.foo", "com.bar"),
+                YidunProbe.accessibilityPackages(
+                        "com.foo/.Svc:com.bar/.Svc"));
+        assertTrue(YidunProbe.accessibilityPackages(null).isEmpty());
+        assertTrue(YidunProbe.isKnownAutomationPackage("org.autojs.autojs"));
+        assertFalse(YidunProbe.isKnownAutomationPackage(
+                "com.android.talkback"));
+        assertTrue(YidunProbe.isKnownClonePackage("com.lbe.parallel"));
+        assertTrue(YidunProbe.isKnownCapturePackage("com.pcapdroid"));
+        assertTrue(YidunProbe.isKnownScreenPackage("com.mobizen"));
+
+        assertNull(YidunProbe.classifyClone(
+                1000, 1000, "/data/a", "/data/a", false, false, false));
+        assertEquals("uid:mismatch my=1000,expected=1001",
+                YidunProbe.classifyClone(
+                        1000, 1001, "/data/a", "/data/a", false, false, false));
+        assertEquals("dataDir:mismatch my=/a,expected=/b",
+                YidunProbe.classifyClone(
+                        1000, 1000, "/a", "/b", false, false, false));
+        assertNull(YidunProbe.classifyClone(
+                1000, 1001, "/a", "/b", true, false, false));
+        assertEquals("package+path", YidunProbe.classifyClone(
+                1000, 1000, "/a", "/a", false, true, true));
+
+        assertFalse(signatures().platformEnabled);
+        assertTrue(signatures().withPlatformEnabled(true).platformEnabled);
+    }
+
+    @Test
     public void allRulesCarryYidunPrefix() {
         List<String> rules = list(YidunProbe.RULE_ROOT, YidunProbe.RULE_MOUNT,
                 YidunProbe.RULE_DEBUG, YidunProbe.RULE_HOOK, YidunProbe.RULE_XPOSED,
@@ -222,5 +261,12 @@ public final class YidunProbeTest {
             assertTrue(rule.startsWith("yidun_"));
         }
         assertTrue(Collections.frequency(rules, YidunProbe.RULE_ROOT) == 1);
+
+        List<String> candidateRules = list(YidunProbe.RULE_PROXY,
+                YidunProbe.RULE_PACKET_CAPTURE, YidunProbe.RULE_CLONE,
+                YidunProbe.RULE_AUTOTAP, YidunProbe.RULE_SCREEN_SHARE);
+        for (String rule : candidateRules) {
+            assertTrue(rule.startsWith("env_"));
+        }
     }
 }

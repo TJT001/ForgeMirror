@@ -106,8 +106,10 @@ def _validate_yidun_node(node: Any, depth: int) -> None:
     elif isinstance(node, str):
         if not node or len(node) > MAX_YIDUN_STRING:
             raise ValueError("yidun strings must be 1..256 chars")
+    elif isinstance(node, bool):
+        pass
     else:
-        raise ValueError("yidun leaves must be strings")
+        raise ValueError("yidun leaves must be strings or booleans")
 
 
 def pack_rules(

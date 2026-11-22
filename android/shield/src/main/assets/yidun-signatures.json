@@ -214,5 +214,9 @@
     "dex2oat_markers": [
       "dex2oat"
     ]
+  },
+  "platform": {
+    "enabled": false,
+    "notes": "candidate layer; enable after ADR validation"
   }
 }

@@ -88,6 +88,26 @@ public class YidunProbeDeviceTest {
     }
 
     @Test
+    public void candidatePlatformProbesHaveNoFalsePositives() {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        YidunSignatures signatures = YidunSignatures.load(context)
+                .withPlatformEnabled(true);
+        List<YidunProbe.Finding> findings = new YidunProbe(signatures).scan(context);
+        List<String> unexpected = new ArrayList<>();
+        for (YidunProbe.Finding finding : findings) {
+            Log.i(TAG, "candidate " + finding.ruleId + " kind=" + finding.kind
+                    + " confidence=" + finding.confidence
+                    + " evidence=" + finding.evidence);
+            if (finding.ruleId.startsWith("env_")
+                    && !"context".equals(finding.kind)) {
+                unexpected.add(finding.ruleId + ":" + finding.evidence);
+            }
+        }
+        assertTrue("candidate false positives: " + unexpected,
+                unexpected.isEmpty());
+    }
+
+    @Test
     public void pkr1PayloadParsesWithProvenance() throws Exception {
         String json = "{\"schema\":\"forgemirror.yidun-signatures/1\","
                 + "\"source\":{\"vendor\":\"NetEase Yidun\","

@@ -39,7 +39,23 @@
 | `yidun_mock_location` | 19 虚拟定位 | `Settings.Secure` 的 `mock_location` / `allow_mock_location` + 10 个常见 mock 包名 | 0.5 / 0.6 |
 | `yidun_rom` | 13 ROM 异常 | `Build.FINGERPRINT` / `BRAND` / `DEVICE` / `PRODUCT` / `MANUFACTURER` 一致性 | 0.4 |
 
-权限与可见性：shield 清单增加 `ACCESS_NETWORK_STATE`；为 mock 包名增加 `<queries>`，不申请运行时权限。未接入：代理、双开、模拟点击、屏幕共享、抓包（5/9）。第二层（代理/抓包、双开、模拟点击）保持 candidate，设计见 `docs/ADR-2026-11-22-环境检测第二层.md`。
+权限与可见性：shield 清单增加 `ACCESS_NETWORK_STATE`；为 mock/双开/抓包/录屏包名增加 `<queries>`，不申请运行时权限。第二层 5/9 已接入但由 `platform.enabled` 默认关闭，设计见 `docs/ADR-2026-11-22-环境检测第二层.md`。
+
+### 第二层候选检测（5/9）
+
+代码已接入，`yidun.platform.enabled=false` 默认关闭。开启后：
+
+| 规则 | 信号 | 置信度 |
+|---|---|---|
+| `env_proxy` | 代理/tun 配置 + 用户 CA 含抓包工具特征 | 0.7；单独代理 0.3 context |
+| `env_packet_capture` | 已知抓包应用 + 抓包 CA | 0.6；单独 CA 0.5 context；单独应用 0.3 context |
+| `env_clone` | UID/数据目录不一致 | 0.7/0.5；已知双开包 + 路径标记 0.5；工作资料跳过 |
+| `env_autotap` | 无障碍开启 + 已知自动化包 | 0.5；普通无障碍服务只记日志 |
+| `env_screen_share` | 已安装已知录屏应用 | 0.3 |
+
+- context 事件由 `ShieldResponse` 跳过，不进入 toast/block。
+- 设备验证（开启候选层）：Pixel 5 仅出现 `env_packet_capture` context（设备装有 PortSwigger 用户 CA），无风险级误报；API 37 模拟器无候选命中。
+- 首轮设备测试发现 `http_proxy=:0` 被误判为代理配置；已改为忽略 `:0`/`0`/`null`。
 
 明确没有吸收：
 
@@ -93,9 +109,9 @@ ShieldArtTest                  3 项
 ShieldChunkStoreTest          26 项
 ShieldNativeFileHookTest       1 项
 ShieldDetectTest               5 项
-YidunProbeTest                 8 项
+YidunProbeTest                 9 项
 YidunSignaturesAssetTest       1 项
-合计                          49 项，0 失败
+合计                          50 项，0 失败
 ```
 
 PKR1 测试：
@@ -105,8 +121,10 @@ backend/tests/pipeline/test_rules.py  9 项，0 失败
   含 yidun roundtrip、bad schema、missing source、bad leaf、真实资产往返
 
 设备端 YidunProbeDeviceTest
-  pkr1PayloadParsesWithProvenance       通过
-  pkr1PayloadWithoutSourceIsRejected    通过
+  probeMatchesDeviceTypeWithoutHookFalsePositives  通过
+  candidatePlatformProbesHaveNoFalsePositives     通过
+  pkr1PayloadParsesWithProvenance                 通过
+  pkr1PayloadWithoutSourceIsRejected              通过
 ```
 
 完整检查：`backend/pipeline/scripts/check.sh` 通过（容器向量、Python 88 项、C++ 向量、Gradle assemble）。
@@ -163,10 +181,11 @@ ANDROID_SERIAL=<serial> ./gradlew :app:connectedDebugAndroidTest \
 12. ROM 检查是 `Build.FINGERPRINT` / `BRAND` / `DEVICE` / `PRODUCT` / `MANUFACTURER` 一致性，不是自定义 ROM 特征表；字段自洽的自定义 ROM 可能不命中。
 13. 虚拟定位依赖 `Settings.Secure` 的 `mock_location` / `allow_mock_location` 和 10 个常见 mock 包名；仅通过 app-ops 授权的新版本可能漏报。
 14. VPN 检查需要 `ACCESS_NETWORK_STATE`；权限缺失或被拒绝时按未命中处理。
-15. 网络/环境类仍有 5/9 未接入：代理、双开、模拟点击、屏幕共享、抓包。
+15. 第二层 5/9 已接入但 `platform.enabled=false` 默认关闭；开启前需按 ADR 完成正负样本与误报率验证。
+16. `env_screen_share` 只能检查已安装的已知录屏应用，无法查询活跃 MediaProjection；`env_autotap` 不实现输入事件注入；`env_clone` 依赖 UID/数据目录，虚拟容器实现差异可能漏报；抓包 CA 枚举上限 128 个用户证书。
 
 ## 下一步
 
 1. 扩充设备矩阵：至少覆盖一个非 root 真机、一个厂商 ROM 和一个 32 位 ABI，确认无误报。
-2. 补齐剩余 5/9 环境检查，以及风险 4/6 的分词与 linker 语义。
+2. 第二层按 ADR 做正负样本与误报率验证后再决定是否默认启用；风险 4/6 的分词与 linker 语义仍待补。
 3. Yidun 特征更新的回滚与灰度策略，以及服务端规则版本与清单 `rule_version` 的一致性。

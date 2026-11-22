@@ -744,7 +744,9 @@ func knownDetectionRule(rule string) bool {
 		"yidun_root", "yidun_mount", "yidun_debug", "yidun_hook",
 		"yidun_xposed", "yidun_injection", "yidun_emulator",
 		"yidun_ld_preload", "yidun_dex", "yidun_usb_debug", "yidun_vpn",
-		"yidun_mock_location", "yidun_rom":
+		"yidun_mock_location", "yidun_rom",
+		"env_proxy", "env_packet_capture", "env_clone", "env_autotap",
+		"env_screen_share":
 		return true
 	default:
 		return false

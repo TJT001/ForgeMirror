@@ -13,6 +13,35 @@
         <package android:name="com.gpsemulator" />
         <package android:name="com.mock.location" />
         <package android:name="com.fakegps.mock" />
+
+        <package android:name="com.lbe.parallel" />
+        <package android:name="com.excelliance.dualaid" />
+        <package android:name="com.polestar.clone" />
+        <package android:name="com.polestar.domultiple" />
+        <package android:name="com.lody.virtual" />
+        <package android:name="io.va.exposed" />
+        <package android:name="com.vmos.pro" />
+        <package android:name="com.vmos.lite" />
+        <package android:name="com.parallel.space" />
+        <package android:name="com.dual.space" />
+        <package android:name="com.clone.app" />
+        <package android:name="com.svm.parallel" />
+
+        <package android:name="com.pcapdroid" />
+        <package android:name="com.emanuelef.remote_capture" />
+        <package android:name="com.minhui.networkcapture" />
+        <package android:name="com.tacapture" />
+        <package android:name="com.packet.capture" />
+        <package android:name="com.wireshark" />
+
+        <package android:name="com.hecorat.screenrecorder.free" />
+        <package android:name="com.duapps.recorder" />
+        <package android:name="com.recorder.screen" />
+        <package android:name="com.mobizen" />
+        <package android:name="com.az.screen.recorder" />
+        <package android:name="com.kimcy929.screenrecorder" />
+        <package android:name="com.orpheusdroid.screenrecorder" />
+        <package android:name="com.izzyondroid.screenrecorder" />
     </queries>
 
     <application>

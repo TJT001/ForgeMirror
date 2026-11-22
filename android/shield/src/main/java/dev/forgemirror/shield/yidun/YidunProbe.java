@@ -2,12 +2,14 @@ package dev.forgemirror.shield.yidun;
 
 import android.content.ContentResolver;
 import android.content.Context;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.os.Build;
 import android.os.Process;
+import android.os.UserManager;
 import android.provider.Settings;
 import android.system.Os;
 import android.util.Log;
@@ -17,8 +19,13 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.lang.reflect.Method;
+import java.net.NetworkInterface;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
+import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -50,6 +57,11 @@ public final class YidunProbe {
     public static final String RULE_VPN = "yidun_vpn";
     public static final String RULE_MOCK_LOCATION = "yidun_mock_location";
     public static final String RULE_ROM = "yidun_rom";
+    public static final String RULE_PROXY = "env_proxy";
+    public static final String RULE_PACKET_CAPTURE = "env_packet_capture";
+    public static final String RULE_CLONE = "env_clone";
+    public static final String RULE_AUTOTAP = "env_autotap";
+    public static final String RULE_SCREEN_SHARE = "env_screen_share";
 
     private static final String TAG = "YidunProbe";
     private static final long MAX_PROC_BYTES = 8L << 20;
@@ -70,6 +82,62 @@ public final class YidunProbe {
             "com.gpsemulator",
             "com.mock.location",
             "com.fakegps.mock",
+    };
+
+    private static final String[] CAPTURE_CA_MARKERS = {
+            "mitmproxy", "charles", "fiddler", "burp", "portswigger",
+            "proxyman", "httptoolkit", "http toolkit", "owasp zap",
+            "zap proxy", "wireshark",
+    };
+
+    private static final String[] CLONE_PACKAGES = {
+            "com.lbe.parallel",
+            "com.excelliance.dualaid",
+            "com.polestar.clone",
+            "com.polestar.domultiple",
+            "com.lody.virtual",
+            "io.va.exposed",
+            "com.vmos.pro",
+            "com.vmos.lite",
+            "com.parallel.space",
+            "com.dual.space",
+            "com.clone.app",
+            "com.svm.parallel",
+    };
+
+    private static final String[] CAPTURE_PACKAGES = {
+            "com.pcapdroid",
+            "com.emanuelef.remote_capture",
+            "com.minhui.networkcapture",
+            "com.tacapture",
+            "com.packet.capture",
+            "com.wireshark",
+    };
+
+    private static final String[] SCREEN_SHARE_PACKAGES = {
+            "com.hecorat.screenrecorder.free",
+            "com.duapps.recorder",
+            "com.recorder.screen",
+            "com.mobizen",
+            "com.az.screen.recorder",
+            "com.kimcy929.screenrecorder",
+            "com.orpheusdroid.screenrecorder",
+            "com.izzyondroid.screenrecorder",
+    };
+
+    private static final String[] AUTOMATION_PACKAGES = {
+            "org.autojs.autojs",
+            "org.autojs.autoxjs",
+            "com.arlosoft.macrodroid",
+            "net.dinglisch.android.taskerm",
+            "com.llamalab.automate",
+            "com.hamibot.hamibot",
+            "com.touchsprite.android",
+            "com.cyjh.mobileanjian",
+            "com.easy.auto.click",
+            "com.auto.clicker",
+            "com.superauto.clicker",
+            "com.github.uiautomator",
     };
 
     public static final class Finding {
@@ -117,6 +185,9 @@ public final class YidunProbe {
         scanVpn(context, findings, seen);
         scanMockLocation(context, findings, seen);
         scanRom(findings, seen);
+        if (signatures.platformEnabled) {
+            scanPlatformCandidates(context, findings, seen);
+        }
         return findings;
     }
 
@@ -281,6 +352,100 @@ public final class YidunProbe {
 
     private static String lower(String value) {
         return value == null ? "" : value.toLowerCase(Locale.US);
+    }
+
+    static boolean hasProxyConfig(String httpProxy, String httpsProxy,
+                                  String globalProxy, String interfaceName) {
+        return validProxy(httpProxy) || validProxy(httpsProxy)
+                || validProxy(globalProxy)
+                || (interfaceName != null && isTunOrPpp(interfaceName));
+    }
+
+    static boolean isTunOrPpp(String name) {
+        return name != null && (name.startsWith("tun") || name.startsWith("ppp"));
+    }
+
+    private static boolean validProxy(String value) {
+        if (value == null) {
+            return false;
+        }
+        String trimmed = value.trim();
+        return !trimmed.isEmpty()
+                && !":0".equals(trimmed)
+                && !"0".equals(trimmed)
+                && !"null".equalsIgnoreCase(trimmed);
+    }
+
+    static boolean hasCaptureCaMarker(String value) {
+        String lowerValue = lower(value);
+        for (String marker : CAPTURE_CA_MARKERS) {
+            if (lowerValue.contains(marker)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static boolean isKnownClonePackage(String name) {
+        return contains(CLONE_PACKAGES, name);
+    }
+
+    static boolean isKnownCapturePackage(String name) {
+        return contains(CAPTURE_PACKAGES, name);
+    }
+
+    static boolean isKnownScreenPackage(String name) {
+        return contains(SCREEN_SHARE_PACKAGES, name);
+    }
+
+    static boolean isKnownAutomationPackage(String name) {
+        return contains(AUTOMATION_PACKAGES, name);
+    }
+
+    private static boolean contains(String[] values, String name) {
+        if (name == null) {
+            return false;
+        }
+        for (String value : values) {
+            if (value.equals(name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static List<String> accessibilityPackages(String value) {
+        List<String> packages = new ArrayList<>();
+        if (value == null || value.isEmpty()) {
+            return packages;
+        }
+        for (String entry : value.split(":")) {
+            int slash = entry.indexOf('/');
+            String name = (slash < 0 ? entry : entry.substring(0, slash)).trim();
+            if (!name.isEmpty() && !packages.contains(name)) {
+                packages.add(name);
+            }
+        }
+        return packages;
+    }
+
+    static String classifyClone(int myUid, int expectedUid, String myDataDir,
+                                String expectedDataDir, boolean managedProfile,
+                                boolean knownClonePackage, boolean pathMarker) {
+        if (managedProfile) {
+            return null;
+        }
+        if (myUid != expectedUid) {
+            return "uid:mismatch my=" + myUid + ",expected=" + expectedUid;
+        }
+        if (myDataDir != null && expectedDataDir != null
+                && !myDataDir.equals(expectedDataDir)) {
+            return "dataDir:mismatch my=" + myDataDir + ",expected=" + expectedDataDir;
+        }
+        if (knownClonePackage && pathMarker) {
+            return "package+path";
+        }
+        return null;
     }
 
     static boolean isReadableMapLine(String line) {
@@ -805,6 +970,200 @@ public final class YidunProbe {
         if (evidence != null) {
             add(findings, seen, RULE_ROM, "rom", evidence, 0.4);
         }
+    }
+
+    private void scanPlatformCandidates(Context context, List<Finding> findings,
+                                        Set<String> seen) {
+        scanProxyAndCapture(context, findings, seen);
+        scanClone(context, findings, seen);
+        scanAutoTap(context, findings, seen);
+        scanScreenShare(context, findings, seen);
+    }
+
+    private void scanProxyAndCapture(Context context, List<Finding> findings,
+                                     Set<String> seen) {
+        String globalProxy = null;
+        try {
+            globalProxy = Settings.Global.getString(context.getContentResolver(),
+                    "http_proxy");
+        } catch (Throwable ignored) {
+            // Setting unavailable.
+        }
+        String interfaceName = findTunOrPppInterface();
+        String httpProxy = System.getProperty("http.proxyHost");
+        String httpsProxy = System.getProperty("https.proxyHost");
+        boolean proxyConfigured = hasProxyConfig(httpProxy, httpsProxy,
+                globalProxy, interfaceName);
+        String captureCa = findCaptureCa();
+        String capturePackage = firstKnownPackage(context, CAPTURE_PACKAGES);
+        String proxyDetail = proxyEvidence(httpProxy, httpsProxy, globalProxy,
+                interfaceName);
+        if (proxyConfigured && captureCa != null) {
+            add(findings, seen, RULE_PROXY, "proxy",
+                    "proxy:" + proxyDetail + ",ca:" + captureCa, 0.7);
+        } else if (proxyConfigured) {
+            add(findings, seen, RULE_PROXY, "context",
+                    "proxy:" + proxyDetail, 0.3);
+        }
+        if (capturePackage != null && captureCa != null) {
+            add(findings, seen, RULE_PACKET_CAPTURE, "capture",
+                    "package:" + capturePackage + ",ca:" + captureCa, 0.6);
+        } else if (captureCa != null) {
+            add(findings, seen, RULE_PACKET_CAPTURE, "context",
+                    "ca:" + captureCa, 0.5);
+        } else if (capturePackage != null) {
+            add(findings, seen, RULE_PACKET_CAPTURE, "context",
+                    "package:" + capturePackage, 0.3);
+        }
+    }
+
+    private static String proxyEvidence(String httpProxy, String httpsProxy,
+                                        String globalProxy, String interfaceName) {
+        StringBuilder builder = new StringBuilder();
+        if (validProxy(httpProxy)) {
+            builder.append("http=").append(httpProxy).append(' ');
+        }
+        if (validProxy(httpsProxy)) {
+            builder.append("https=").append(httpsProxy).append(' ');
+        }
+        if (validProxy(globalProxy)) {
+            builder.append("global=").append(globalProxy).append(' ');
+        }
+        if (interfaceName != null) {
+            builder.append("iface=").append(interfaceName);
+        }
+        return builder.toString().trim();
+    }
+
+    private void scanClone(Context context, List<Finding> findings, Set<String> seen) {
+        try {
+            PackageManager manager = context.getPackageManager();
+            ApplicationInfo info = manager.getApplicationInfo(
+                    context.getPackageName(), 0);
+            boolean managed = false;
+            if (Build.VERSION.SDK_INT >= 24) {
+                UserManager users = (UserManager) context.getSystemService(
+                        Context.USER_SERVICE);
+                managed = users != null && users.isManagedProfile();
+            }
+            String myDataDir = context.getDataDir() == null
+                    ? null : context.getDataDir().getAbsolutePath();
+            String expectedDataDir = info.dataDir;
+            boolean knownPackage = firstKnownPackage(context, CLONE_PACKAGES) != null;
+            String path = lower(myDataDir) + "|" + lower(context.getPackageCodePath());
+            boolean pathMarker = path.contains("clone")
+                    || path.contains("parallel") || path.contains("virtual");
+            String evidence = classifyClone(Process.myUid(), info.uid, myDataDir,
+                    expectedDataDir, managed, knownPackage, pathMarker);
+            if (evidence != null) {
+                double confidence = evidence.startsWith("uid:") ? 0.7 : 0.5;
+                add(findings, seen, RULE_CLONE, "clone", evidence, confidence);
+            }
+        } catch (Throwable error) {
+            Log.w(TAG, "clone probe unavailable: " + error);
+        }
+    }
+
+    private void scanAutoTap(Context context, List<Finding> findings,
+                             Set<String> seen) {
+        try {
+            int enabled = Settings.Secure.getInt(context.getContentResolver(),
+                    Settings.Secure.ACCESSIBILITY_ENABLED, 0);
+            if (enabled != 1) {
+                return;
+            }
+            String value = Settings.Secure.getString(context.getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            List<String> packages = accessibilityPackages(value);
+            if (!packages.isEmpty()) {
+                Log.i(TAG, "accessibility services enabled count=" + packages.size());
+            }
+            for (String packageName : packages) {
+                if (isKnownAutomationPackage(packageName)) {
+                    add(findings, seen, RULE_AUTOTAP, "autotap",
+                            "accessibility:" + packageName, 0.5);
+                }
+            }
+        } catch (Throwable error) {
+            Log.w(TAG, "accessibility probe unavailable: " + error);
+        }
+    }
+
+    private void scanScreenShare(Context context, List<Finding> findings,
+                                 Set<String> seen) {
+        String packageName = firstKnownPackage(context, SCREEN_SHARE_PACKAGES);
+        if (packageName != null) {
+            add(findings, seen, RULE_SCREEN_SHARE, "screen",
+                    "package:" + packageName, 0.3);
+        }
+    }
+
+    private static String findTunOrPppInterface() {
+        try {
+            Enumeration<NetworkInterface> interfaces =
+                    NetworkInterface.getNetworkInterfaces();
+            if (interfaces == null) {
+                return null;
+            }
+            while (interfaces.hasMoreElements()) {
+                String name = interfaces.nextElement().getName();
+                if (isTunOrPpp(name)) {
+                    return name;
+                }
+            }
+        } catch (Throwable ignored) {
+            // Interface list unavailable.
+        }
+        return null;
+    }
+
+    private static String findCaptureCa() {
+        try {
+            KeyStore store = KeyStore.getInstance("AndroidCAStore");
+            store.load(null, null);
+            Enumeration<String> aliases = store.aliases();
+            int visited = 0;
+            while (aliases.hasMoreElements() && visited++ < 128) {
+                String alias = aliases.nextElement();
+                if (!alias.startsWith("user:")) {
+                    continue;
+                }
+                KeyStore.Entry entry = store.getEntry(alias, null);
+                if (!(entry instanceof KeyStore.TrustedCertificateEntry)) {
+                    continue;
+                }
+                Certificate certificate = ((KeyStore.TrustedCertificateEntry) entry)
+                        .getTrustedCertificate();
+                if (!(certificate instanceof X509Certificate)) {
+                    continue;
+                }
+                X509Certificate x509 = (X509Certificate) certificate;
+                String name = x509.getSubjectX500Principal().getName() + "|"
+                        + x509.getIssuerX500Principal().getName();
+                if (hasCaptureCaMarker(name)) {
+                    return name;
+                }
+            }
+        } catch (Throwable ignored) {
+            // AndroidCAStore unavailable.
+        }
+        return null;
+    }
+
+    private static String firstKnownPackage(Context context, String[] names) {
+        PackageManager manager = context.getPackageManager();
+        for (String name : names) {
+            try {
+                manager.getPackageInfo(name, 0);
+                return name;
+            } catch (PackageManager.NameNotFoundException ignored) {
+                // Not installed.
+            } catch (Throwable error) {
+                Log.w(TAG, "package probe unavailable: " + error);
+                return null;
+            }
+        }
+        return null;
     }
 
     private static void add(List<Finding> findings, Set<String> seen,

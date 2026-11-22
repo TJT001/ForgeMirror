@@ -70,6 +70,7 @@
 - `logic` 仅支持 `all` / `any`；
 - `yara` 可选，UTF-8 源码，上限 64 KiB；编译失败时不加载规则包；
 - `yidun` 可选；存在时必须带 `schema=forgemirror.yidun-signatures/1` 和完整的 `source`（vendor/library/sample_sha256/evidence），字符串叶子 1..256 字符、每层列表 ≤1024、嵌套 ≤3；校验失败整包拒绝；
+- `yidun.platform.enabled` 控制候选层（代理/抓包、双开、模拟点击、屏幕共享），默认 false；候选层 context 事件只记录不 toast；
 - 解析失败、签名失败或版本不满足时整包拒绝，不部分加载；
 - 研究侧九条规则只作研究证据；产品规则独立编写并记录特征来源与许可。
 
