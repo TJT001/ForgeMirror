@@ -131,6 +131,7 @@ final class ShieldDetect {
         scanKnownPaths(findings, seen);
         scanFridaPorts(findings, seen);
         scanFridaProcesses(findings, seen);
+        scanHookMounts(findings, seen);
         scanYidun(context, findings, seen);
         return findings;
     }
@@ -514,6 +515,38 @@ final class ShieldDetect {
         }
     }
 
+    private static void scanHookMounts(List<Finding> findings, Set<String> seen) {
+        String mounts = readFile("/proc/self/mounts");
+        if (mounts.isEmpty()) {
+            return;
+        }
+        for (String line : mounts.split("\n")) {
+            String lower = line.toLowerCase(Locale.US);
+            String ruleId = null;
+            String kind = null;
+            String marker = null;
+            if (lower.contains("lsposed") || lower.contains("edxposed")) {
+                ruleId = "env_xposed";
+                kind = "xposed";
+                marker = "lsposed/edxposed";
+            } else if (lower.contains("riru")) {
+                ruleId = "env_injection";
+                kind = "injection";
+                marker = "riru";
+            } else if (lower.contains("zygisk") || lower.contains("shamiko")) {
+                ruleId = "env_hook";
+                kind = "hook";
+                marker = "zygisk/shamiko";
+            }
+            if (ruleId == null) {
+                continue;
+            }
+            add(findings, seen, ruleId, kind,
+                    "mount:" + marker + ":" + line.trim(),
+                    confidenceForRule(ruleId));
+        }
+    }
+
     private static void scanXposedClass(List<Finding> findings, Set<String> seen) {
         String[] classes = {
                 "de.robv.android.xposed.XposedBridge",
@@ -528,6 +561,24 @@ final class ShieldDetect {
                 // Not present.
             }
         }
+    }
+
+    private static String readFile(String path) {
+        File file = new File(path);
+        if (!file.isFile()) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                new FileInputStream(file), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                out.append(line).append('\n');
+            }
+        } catch (Exception error) {
+            return "";
+        }
+        return out.toString();
     }
 
     private static void add(List<Finding> findings, Set<String> seen,
