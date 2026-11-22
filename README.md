@@ -80,7 +80,9 @@
 - 类仅包含静态字符串和 getter，运行时不引用、不加载，App 行为不变
 - 开关贯通 CLI / API / worker / Web 界面，默认关闭
 - 不保证任何模型终止分析；可能引起应用商店或 EDR 误报，仅在研究场景开启
+<img src="docs/images/workbench.png" width="640" alt="ForgeMirror 加固工作台">
 
+<img src="docs/images/demo-app-audit.png" width="320" alt="参照 App 加固与检测审计">
 ## 技术选型
 
 Vue 3 + TypeScript + Vite；Go + Gin + PostgreSQL/pgx；Python worker 与流水线；Android Java + C++17。详见 [架构选型](docs/架构选型.md)。
