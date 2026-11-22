@@ -743,7 +743,8 @@ func knownDetectionRule(rule string) bool {
 		"env_hook", "env_debugger", "env_root", "env_emulator", "file_tamper",
 		"yidun_root", "yidun_mount", "yidun_debug", "yidun_hook",
 		"yidun_xposed", "yidun_injection", "yidun_emulator",
-		"yidun_ld_preload", "yidun_dex":
+		"yidun_ld_preload", "yidun_dex", "yidun_usb_debug", "yidun_vpn",
+		"yidun_mock_location", "yidun_rom":
 		return true
 	default:
 		return false

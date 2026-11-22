@@ -26,7 +26,20 @@
 | `android/shield/src/main/java/dev/forgemirror/shield/yidun/YidunProbe.java` | root/mount、逐线程 `TracerPid`/zombie、`NativeBridgeError`、模拟器路径/属性/Build、VMOS 服务、maps 标记 + ELF `e_machine` 过滤、Xposed 类与服务、fd readlink、`LD_PRELOAD`、云手机包名、code_cache DEX 魔数、`dex2oat` maps 特征 |
 | `android/shield/src/main/java/dev/forgemirror/shield/ShieldDetect.java` | 接入通用检测链路；按 evidence 去重，规则 ID 保留 `yidun_` 前缀 |
 
-规则 ID：`yidun_root`、`yidun_mount`、`yidun_debug`、`yidun_hook`、`yidun_xposed`、`yidun_injection`、`yidun_emulator`、`yidun_ld_preload`、`yidun_dex`。响应仍走 `ShieldResponse` 的 log/toast，没有 exit/kill 分支。
+规则 ID：`yidun_root`、`yidun_mount`、`yidun_debug`、`yidun_hook`、`yidun_xposed`、`yidun_injection`、`yidun_emulator`、`yidun_ld_preload`、`yidun_dex`、`yidun_usb_debug`、`yidun_vpn`、`yidun_mock_location`、`yidun_rom`。响应仍走 `ShieldResponse` 的 log/toast，没有 exit/kill 分支。
+
+### 平台环境检查（4/9）
+
+针对易盾 21 类风险中的网络/环境项，先接入 4 个低误报检查；这些检查使用 Android 系统 API 独立实现，不依赖 `libnesec` 特征表。
+
+| 规则 | 风险 | 实现 | 置信度 |
+|---|---|---|---|
+| `yidun_usb_debug` | 12 USB 调试 | `Settings.Global.ADB_ENABLED` + `ro.debuggable` | 0.7 / 0.5 / 0.4 |
+| `yidun_vpn` | 10 VPN | `ConnectivityManager` 活跃/全部网络的 `TRANSPORT_VPN` | 0.7 |
+| `yidun_mock_location` | 19 虚拟定位 | `Settings.Secure` 的 `mock_location` / `allow_mock_location` + 10 个常见 mock 包名 | 0.5 / 0.6 |
+| `yidun_rom` | 13 ROM 异常 | `Build.FINGERPRINT` / `BRAND` / `DEVICE` / `PRODUCT` / `MANUFACTURER` 一致性 | 0.4 |
+
+权限与可见性：shield 清单增加 `ACCESS_NETWORK_STATE`；为 mock 包名增加 `<queries>`，不申请运行时权限。未接入：代理、双开、模拟点击、屏幕共享、抓包（5/9）。第二层（代理/抓包、双开、模拟点击）保持 candidate，设计见 `docs/ADR-2026-11-22-环境检测第二层.md`。
 
 明确没有吸收：
 
@@ -80,9 +93,9 @@ ShieldArtTest                  3 项
 ShieldChunkStoreTest          26 项
 ShieldNativeFileHookTest       1 项
 ShieldDetectTest               5 项
-YidunProbeTest                 7 项
+YidunProbeTest                 8 项
 YidunSignaturesAssetTest       1 项
-合计                          48 项，0 失败
+合计                          49 项，0 失败
 ```
 
 PKR1 测试：
@@ -116,12 +129,12 @@ dex2oat ['dex2oat']
 
 | 设备 | 环境 | 命中 | 结论 |
 |---|---|---|---|
-| Pixel 5（Android 11 / API 30） | 已 root，Magisk + Zygisk | `yidun_root` `/system_ext/bin/su`；`yidun_mount` `mount:magisk:...` | root/mount 真阳性；emulator/hook/xposed/injection/dex 均 0 误报 |
-| Medium_Phone_API_37.0（API 37，arm64） | 标准 AVD | `yidun_emulator` `property:ro.kernel.qemu=1` | 模拟器真阳性；hook/xposed/injection/dex 均 0 误报 |
+| Pixel 5（Android 11 / API 30） | 已 root，Magisk + Zygisk，ADB 开启 | `yidun_root` `/system_ext/bin/su`；`yidun_mount` `mount:magisk:...`；`yidun_usb_debug` `ADB_ENABLED=1` | root/mount/usb 真阳性；emulator/hook/xposed/injection/dex/vpn/location/rom 均 0 误报 |
+| Medium_Phone_API_37.0（API 37，arm64） | 标准 AVD，ADB 开启 | `yidun_emulator` `property:ro.kernel.qemu=1`；`yidun_usb_debug` `ADB_ENABLED=1` | emulator/usb 真阳性；hook/xposed/injection/dex/vpn/location/rom 均 0 误报 |
 
-新增探针在两类设备上的结果：VMOS 服务未出现；maps 中无 Hook 标记，ELF 过滤未产生命中；`code_cache` 无 `.dex`，`dex2oat` 未映射进进程。
+新增探针在两类设备上的结果：VMOS 服务未出现；maps 中无 Hook 标记，ELF 过滤未产生命中；`code_cache` 无 `.dex`，`dex2oat` 未映射进进程；USB 调试按 ADB 开启预期命中，VPN/虚拟定位/ROM 均未命中。
 
-探针耗时（同一测试，最终版本）：Pixel 5 约 80–140 ms；API 37 模拟器约 540–580 ms（冷启动首轮 1.6 s）。首轮模拟器曾达 13 s，原因是每个属性都重新反射解析 `SystemProperties`；缓存反射句柄后恢复。
+探针耗时（同一测试，最终版本）：Pixel 5 约 90–130 ms；API 37 模拟器约 590 ms（冷启动首轮 2.2 s）。首轮模拟器曾达 13 s，原因是每个属性都重新反射解析 `SystemProperties`；缓存反射句柄后恢复。
 
 设备测试：`android/app/src/androidTest/java/dev/forgemirror/demo/YidunProbeDeviceTest.java`。
 
@@ -130,9 +143,9 @@ ANDROID_SERIAL=<serial> ./gradlew :app:connectedDebugAndroidTest \
   -Pandroid.testInstrumentationRunnerArguments.class=dev.forgemirror.demo.YidunProbeDeviceTest
 ```
 
-断言策略：真机不得出现 emulator 命中；模拟器必须出现 emulator 命中；两类设备都不得出现 hook/xposed/injection 命中。`code_cache` 中标准 DEX 允许（0.5），未知魔数或 `dex2oat` maps 视为误报；root 命中不设断言，取决于设备是否 root。
+断言策略：真机不得出现 emulator 命中；模拟器必须出现 emulator 命中；两类设备都不得出现 hook/xposed/injection/vpn/location/rom 命中；USB 调试在 ADB 开启的设备上按预期命中。`code_cache` 中标准 DEX 允许（0.5），未知魔数或 `dex2oat` maps 视为误报；root 命中不设断言，取决于设备是否 root。
 
-单测覆盖：su 路径、mount 行与标记去重、模拟器路径/Build/属性/包名、VMOS 服务、maps 行解析与 ELF `e_machine`（四种 ABI、大小端）、hook maps 分组、Xposed/SandHook 类、`LD_PRELOAD`、`TracerPid`/zombie、DEX 魔数分类与脱敏输出，以及资产来源元数据。
+单测覆盖：su 路径、mount 行与标记去重、模拟器路径/Build/属性/包名、VMOS 服务、maps 行解析与 ELF `e_machine`（四种 ABI、大小端）、hook maps 分组、Xposed/SandHook 类、`LD_PRELOAD`、`TracerPid`/zombie、DEX 魔数分类、USB 调试、mock 设置/包名、ROM 字段一致性，以及资产来源元数据。
 
 ## 限制
 
@@ -146,8 +159,14 @@ ANDROID_SERIAL=<serial> ./gradlew :app:connectedDebugAndroidTest \
 8. mount 命中已按标记去重：同一标记只报一条，避免 Magisk 多行挂载刷屏。
 9. ELF 过滤在原样本 arm64 基础上扩展到 AArch64/ARM/x86/x86_64；APK 内 `!` 映射（如 `base.apk!lib/...so`）跳过，不读取 ELF 头。
 10. DEX 检查只扫 `code_cache` 的 `.dex`：标准魔数 0.5，未知魔数 0.7；`dex2oat` 只在自身 maps 命中时 0.4，正常设备通常不出现。
+11. USB 调试在 ADB 开启的设备上是真阳性；测试设备因连接 adb 均为开启状态。
+12. ROM 检查是 `Build.FINGERPRINT` / `BRAND` / `DEVICE` / `PRODUCT` / `MANUFACTURER` 一致性，不是自定义 ROM 特征表；字段自洽的自定义 ROM 可能不命中。
+13. 虚拟定位依赖 `Settings.Secure` 的 `mock_location` / `allow_mock_location` 和 10 个常见 mock 包名；仅通过 app-ops 授权的新版本可能漏报。
+14. VPN 检查需要 `ACCESS_NETWORK_STATE`；权限缺失或被拒绝时按未命中处理。
+15. 网络/环境类仍有 5/9 未接入：代理、双开、模拟点击、屏幕共享、抓包。
 
 ## 下一步
 
 1. 扩充设备矩阵：至少覆盖一个非 root 真机、一个厂商 ROM 和一个 32 位 ABI，确认无误报。
-2. Yidun 特征更新的回滚与灰度策略，以及服务端规则版本与清单 `rule_version` 的一致性。
+2. 补齐剩余 5/9 环境检查，以及风险 4/6 的分词与 linker 语义。
+3. Yidun 特征更新的回滚与灰度策略，以及服务端规则版本与清单 `rule_version` 的一致性。

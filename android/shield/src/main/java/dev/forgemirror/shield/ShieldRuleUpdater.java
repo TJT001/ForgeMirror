@@ -132,6 +132,10 @@ final class ShieldRuleUpdater {
             case "yidun_emulator":
             case "yidun_ld_preload":
             case "yidun_dex":
+            case "yidun_usb_debug":
+            case "yidun_vpn":
+            case "yidun_mock_location":
+            case "yidun_rom":
                 return true;
             default:
                 return false;

@@ -178,11 +178,46 @@ public final class YidunProbeTest {
     }
 
     @Test
+    public void platformChecks() {
+        assertTrue(YidunProbe.isUsbDebugging(1));
+        assertFalse(YidunProbe.isUsbDebugging(0));
+
+        assertTrue(YidunProbe.isMockLocationSetting("com.lexa.fakegps"));
+        assertFalse(YidunProbe.isMockLocationSetting("0"));
+        assertFalse(YidunProbe.isMockLocationSetting("null"));
+        assertFalse(YidunProbe.isMockLocationSetting(""));
+        assertFalse(YidunProbe.isMockLocationSetting(null));
+        assertTrue(YidunProbe.isKnownMockLocationPackage("com.lexa.fakegps"));
+        assertFalse(YidunProbe.isKnownMockLocationPackage(
+                "dev.forgemirror.demo"));
+
+        assertNull(YidunProbe.classifyRom(
+                "google/redfin/redfin:11/RQ3A.211001.001/7641976:user/release-keys",
+                "google", "redfin", "redfin", "Google"));
+        assertEquals("Build.FINGERPRINT.device=redfin,Build.DEVICE=sunfish",
+                YidunProbe.classifyRom(
+                        "google/redfin/redfin:11/RQ3A.211001.001/7641976:user/release-keys",
+                        "google", "sunfish", "sunfish", "Google"));
+        assertEquals("Build.FINGERPRINT.brand=google,Build.BRAND=samsung",
+                YidunProbe.classifyRom(
+                        "google/redfin/redfin:11/RQ3A.211001.001/7641976:user/release-keys",
+                        "samsung", "redfin", "redfin", "Samsung"));
+        assertEquals("Build.FINGERPRINT=malformed", YidunProbe.classifyRom(
+                "bad", "google", "redfin", "redfin", "Google"));
+        assertEquals("Build.field_unknown=BRAND:google,DEVICE:redfin,PRODUCT:redfin,MANUFACTURER:",
+                YidunProbe.classifyRom(
+                        "google/redfin/redfin:11/RQ3A.211001.001/7641976:user/release-keys",
+                        "google", "redfin", "redfin", ""));
+    }
+
+    @Test
     public void allRulesCarryYidunPrefix() {
         List<String> rules = list(YidunProbe.RULE_ROOT, YidunProbe.RULE_MOUNT,
                 YidunProbe.RULE_DEBUG, YidunProbe.RULE_HOOK, YidunProbe.RULE_XPOSED,
                 YidunProbe.RULE_INJECTION, YidunProbe.RULE_EMULATOR,
-                YidunProbe.RULE_LD_PRELOAD, YidunProbe.RULE_DEX);
+                YidunProbe.RULE_LD_PRELOAD, YidunProbe.RULE_DEX,
+                YidunProbe.RULE_USB_DEBUG, YidunProbe.RULE_VPN,
+                YidunProbe.RULE_MOCK_LOCATION, YidunProbe.RULE_ROM);
         for (String rule : rules) {
             assertTrue(rule.startsWith("yidun_"));
         }

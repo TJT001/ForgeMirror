@@ -59,8 +59,15 @@ public class YidunProbeDeviceTest {
             } else if ("dex".equals(finding.kind)) {
                 dexFindings.add(finding.ruleId + ":" + finding.evidence);
             } else if ("hook".equals(finding.kind) || "xposed".equals(finding.kind)
-                    || "injection".equals(finding.kind)) {
+                    || "injection".equals(finding.kind)
+                    || "vpn".equals(finding.kind)
+                    || "location".equals(finding.kind)
+                    || "rom".equals(finding.kind)) {
+                // Test devices have no active VPN, mock-location app/setting,
+                // or custom ROM; these would be false positives here.
                 unexpected.add(finding.ruleId + ":" + finding.evidence);
+            } else if ("usb".equals(finding.kind)) {
+                Log.i(TAG, "usb debugging detected (expected with adb enabled)");
             }
         }
         for (String dex : dexFindings) {
@@ -70,8 +77,8 @@ public class YidunProbeDeviceTest {
                 unexpected.add(dex);
             }
         }
-        assertTrue("unexpected hook/xposed/injection/dex findings: " + unexpected,
-                unexpected.isEmpty());
+        assertTrue("unexpected hook/xposed/injection/vpn/location/rom/dex findings: "
+                        + unexpected, unexpected.isEmpty());
         if (emulator) {
             assertFalse("emulator not detected: " + findings, emulatorFindings.isEmpty());
         } else {

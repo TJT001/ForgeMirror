@@ -1,9 +1,14 @@
 package dev.forgemirror.shield.yidun;
 
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.os.Build;
 import android.os.Process;
+import android.provider.Settings;
 import android.system.Os;
 import android.util.Log;
 
@@ -41,6 +46,10 @@ public final class YidunProbe {
     public static final String RULE_EMULATOR = "yidun_emulator";
     public static final String RULE_LD_PRELOAD = "yidun_ld_preload";
     public static final String RULE_DEX = "yidun_dex";
+    public static final String RULE_USB_DEBUG = "yidun_usb_debug";
+    public static final String RULE_VPN = "yidun_vpn";
+    public static final String RULE_MOCK_LOCATION = "yidun_mock_location";
+    public static final String RULE_ROM = "yidun_rom";
 
     private static final String TAG = "YidunProbe";
     private static final long MAX_PROC_BYTES = 8L << 20;
@@ -49,6 +58,19 @@ public final class YidunProbe {
     private static final int MAX_PACKAGES = 128;
     private static final int MAX_MAPS_FILES = 64;
     private static final int MAX_DEX_FILES = 64;
+
+    private static final String[] MOCK_LOCATION_PACKAGES = {
+            "com.lexa.fakegps",
+            "com.incorporateapps.fakegps",
+            "com.rosteam.gpsemulator",
+            "ru.gavrikov.mocklocations",
+            "com.fly.gps",
+            "com.blogspot.newapphorizons.fakegps",
+            "com.evezzon.gpsemulator",
+            "com.gpsemulator",
+            "com.mock.location",
+            "com.fakegps.mock",
+    };
 
     public static final class Finding {
         public final String ruleId;
@@ -91,6 +113,10 @@ public final class YidunProbe {
         scanCloudPhonePackages(context, findings, seen);
         scanCloudServices(findings, seen);
         scanDexFiles(context, findings, seen);
+        scanUsbDebugging(context, findings, seen);
+        scanVpn(context, findings, seen);
+        scanMockLocation(context, findings, seen);
+        scanRom(findings, seen);
         return findings;
     }
 
@@ -200,6 +226,61 @@ public final class YidunProbe {
 
     static boolean matchCloudService(String name, YidunSignatures signatures) {
         return name != null && signatures.cloudServices.contains(name);
+    }
+
+    static boolean isUsbDebugging(int adbEnabled) {
+        return adbEnabled == 1;
+    }
+
+    static boolean isMockLocationSetting(String value) {
+        return value != null && !value.isEmpty()
+                && !"0".equals(value) && !"null".equalsIgnoreCase(value);
+    }
+
+    static boolean isKnownMockLocationPackage(String name) {
+        if (name == null) {
+            return false;
+        }
+        for (String candidate : MOCK_LOCATION_PACKAGES) {
+            if (candidate.equals(name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static String classifyRom(String fingerprint, String brand, String device,
+                              String product, String manufacturer) {
+        String fp = lower(fingerprint);
+        String b = lower(brand);
+        String d = lower(device);
+        if (isUnknownBuildField(b) || isUnknownBuildField(d)
+                || isUnknownBuildField(lower(product))
+                || isUnknownBuildField(lower(manufacturer))) {
+            return "Build.field_unknown=BRAND:" + brand + ",DEVICE:" + device
+                    + ",PRODUCT:" + product + ",MANUFACTURER:" + manufacturer;
+        }
+        String[] parts = fp.split("/");
+        if (parts.length < 3) {
+            return "Build.FINGERPRINT=malformed";
+        }
+        int colon = parts[2].indexOf(':');
+        String fpDevice = colon < 0 ? parts[2] : parts[2].substring(0, colon);
+        if (!parts[0].isEmpty() && !parts[0].equals(b)) {
+            return "Build.FINGERPRINT.brand=" + parts[0] + ",Build.BRAND=" + b;
+        }
+        if (!fpDevice.isEmpty() && !fpDevice.equals(d)) {
+            return "Build.FINGERPRINT.device=" + fpDevice + ",Build.DEVICE=" + d;
+        }
+        return null;
+    }
+
+    private static boolean isUnknownBuildField(String value) {
+        return value.isEmpty() || "unknown".equals(value);
+    }
+
+    private static String lower(String value) {
+        return value == null ? "" : value.toLowerCase(Locale.US);
     }
 
     static boolean isReadableMapLine(String line) {
@@ -637,6 +718,92 @@ public final class YidunProbe {
             add(findings, seen, RULE_DEX, "dex",
                     "dex:" + file.getAbsolutePath() + " magic=" + printable(magic),
                     standard ? 0.5 : 0.7);
+        }
+    }
+
+    private void scanUsbDebugging(Context context, List<Finding> findings,
+                                  Set<String> seen) {
+        int enabled = 0;
+        try {
+            enabled = Settings.Global.getInt(context.getContentResolver(),
+                    Settings.Global.ADB_ENABLED, 0);
+        } catch (Throwable error) {
+            Log.w(TAG, "usb debug setting unavailable: " + error);
+        }
+        boolean debuggable = "1".equals(property("ro.debuggable"));
+        if (isUsbDebugging(enabled)) {
+            add(findings, seen, RULE_USB_DEBUG, "usb",
+                    debuggable
+                            ? "Settings.Global.ADB_ENABLED=1,ro.debuggable=1"
+                            : "Settings.Global.ADB_ENABLED=1",
+                    debuggable ? 0.7 : 0.5);
+        } else if (debuggable) {
+            add(findings, seen, RULE_USB_DEBUG, "usb", "ro.debuggable=1", 0.4);
+        }
+    }
+
+    private void scanVpn(Context context, List<Finding> findings, Set<String> seen) {
+        try {
+            ConnectivityManager manager = (ConnectivityManager) context
+                    .getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (manager == null) {
+                return;
+            }
+            Network active = manager.getActiveNetwork();
+            NetworkCapabilities activeCaps = active == null
+                    ? null : manager.getNetworkCapabilities(active);
+            if (activeCaps != null
+                    && activeCaps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                add(findings, seen, RULE_VPN, "vpn",
+                        "active-network:TRANSPORT_VPN", 0.7);
+                return;
+            }
+            for (Network network : manager.getAllNetworks()) {
+                NetworkCapabilities caps = manager.getNetworkCapabilities(network);
+                if (caps != null
+                        && caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                    add(findings, seen, RULE_VPN, "vpn",
+                            "network:TRANSPORT_VPN", 0.7);
+                    return;
+                }
+            }
+        } catch (Throwable error) {
+            Log.w(TAG, "vpn probe unavailable: " + error);
+        }
+    }
+
+    private void scanMockLocation(Context context, List<Finding> findings,
+                                  Set<String> seen) {
+        ContentResolver resolver = context.getContentResolver();
+        try {
+            String mock = Settings.Secure.getString(resolver, "mock_location");
+            if (isMockLocationSetting(mock)) {
+                add(findings, seen, RULE_MOCK_LOCATION, "location",
+                        "secure:mock_location=" + mock, 0.5);
+            }
+        } catch (Throwable error) {
+            Log.w(TAG, "mock location setting unavailable: " + error);
+        }
+        PackageManager manager = context.getPackageManager();
+        for (String name : MOCK_LOCATION_PACKAGES) {
+            try {
+                manager.getPackageInfo(name, 0);
+                add(findings, seen, RULE_MOCK_LOCATION, "location",
+                        "package:" + name, 0.4);
+            } catch (PackageManager.NameNotFoundException ignored) {
+                // Not installed.
+            } catch (Throwable error) {
+                Log.w(TAG, "mock package probe unavailable: " + error);
+                break;
+            }
+        }
+    }
+
+    private void scanRom(List<Finding> findings, Set<String> seen) {
+        String evidence = classifyRom(Build.FINGERPRINT, Build.BRAND, Build.DEVICE,
+                Build.PRODUCT, Build.MANUFACTURER);
+        if (evidence != null) {
+            add(findings, seen, RULE_ROM, "rom", evidence, 0.4);
         }
     }
 
