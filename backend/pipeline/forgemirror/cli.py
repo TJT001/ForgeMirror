@@ -222,6 +222,9 @@ def protect_apk(
                                            min=1, max=4096),
     whitebox: bool = typer.Option(False, "--whitebox-key/--no-whitebox-key",
                                   help="Wrap the embedded content key with the white-box AES vault."),
+    whitebox_random_table: bool = typer.Option(
+        True, "--whitebox-random-table/--no-whitebox-random-table",
+        help="Generate a fresh white-box table per build instead of the bundled one."),
     ai_decoy: bool = typer.Option(
         False, "--ai-decoy/--no-ai-decoy",
         help="Inject unused security-themed decoy classes into the stub DEX."),
@@ -344,6 +347,7 @@ def protect_apk(
                 response=response,
                 max_native_file_mb=max_native_file_mb,
                 whitebox=whitebox,
+                whitebox_random_table=whitebox_random_table,
                 ai_decoy=ai_decoy,
                 ai_decoy_lexicon=ai_decoy_lexicon,
                 alg=alg,

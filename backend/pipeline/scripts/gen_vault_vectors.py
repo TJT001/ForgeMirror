@@ -70,6 +70,16 @@ def main() -> int:
         package_nonce, package_plain, bytes(header)) + b"\xAA" * 64
     (OUT / "package.bin").write_bytes(package)
     (OUT / "package-plain.bin").write_bytes(package_plain)
+    generated_dir = Path("/tmp/fmvault-gen")
+    generated_dir.mkdir(parents=True, exist_ok=True)
+    generated = generated_dir / "wbaes.generated"
+    whitebox.generate_table(generated)
+    generated_table = generated.read_bytes()
+    generated_dir.joinpath("gen-table.flat").write_bytes(
+        whitebox.export_table(generated_table))
+    generated_dir.joinpath("gen-key.wb").write_bytes(
+        whitebox.wrap(generated_table, KEY, NONCE))
+    generated_dir.joinpath("gen-key.bin").write_bytes(KEY)
     (OUT / "manifest.json").write_text(json.dumps({
         "files": [name for name, _ in FILES],
         "derive_ids": sorted(LABELS),

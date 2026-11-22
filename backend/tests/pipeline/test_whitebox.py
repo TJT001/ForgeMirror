@@ -48,5 +48,24 @@ class WhiteboxWrapTests(unittest.TestCase):
             self.assertEqual(Path(str(wrapped) + ".out").read_bytes(), key)
 
 
+    def test_generated_table_roundtrip(self):
+        with tempfile.TemporaryDirectory(prefix="fm-wbgen-") as temporary:
+            generated = Path(temporary) / "wbaes.generated"
+            whitebox.generate_table(generated)
+            table = generated.read_bytes()
+
+            self.assertGreater(len(table), 1_000_000)
+            flat = whitebox.export_table(table)
+            self.assertEqual(flat[:4], b"WBX1")
+            bundled = (Path(__file__).resolve().parents[2]
+                       / "pipeline/forgemirror/data/wbaes.table").read_bytes()
+            self.assertNotEqual(flat, whitebox.export_table(bundled))
+
+            key = bytes(range(32, 64))
+            nonce = bytes(range(12, 24))
+            blob = whitebox.wrap(table, key, nonce)
+            self.assertNotEqual(blob[16:], key)
+
+
 if __name__ == "__main__":
     unittest.main()

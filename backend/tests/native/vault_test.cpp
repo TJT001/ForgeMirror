@@ -31,8 +31,8 @@ bool equal(const uint8_t *data, const std::vector<uint8_t> &expected) {
 }  // namespace
 
 int main(int argc, char **argv) {
-    if (argc != 2) {
-        std::cerr << "usage: vault_test <vector-dir>\n";
+    if (argc != 2 && argc != 3) {
+        std::cerr << "usage: vault_test <vector-dir> [generated-dir]\n";
         return 2;
     }
     fs::path dir = argv[1];
@@ -120,6 +120,39 @@ int main(int argc, char **argv) {
             std::cerr << "tampered package accepted\n";
             fm_free_bytes(plain);
             return 1;
+        }
+
+        if (argc >= 3) {
+            fs::path generated = argv[2];
+            if (fs::exists(generated / "gen-table.flat")) {
+                auto gen_table = read_file(generated / "gen-table.flat");
+                auto gen_blob = read_file(generated / "gen-key.wb");
+                auto gen_key = read_file(generated / "gen-key.bin");
+                fm_wb_table gen_parsed{};
+                if (fm_wb_parse(gen_table.data(), gen_table.size(), &gen_parsed) != 0) {
+                    std::cerr << "generated table rejected\n";
+                    return 1;
+                }
+                uint8_t unwrapped[32];
+                if (fm_wb_unwrap(&gen_parsed, gen_blob.data(), gen_blob.size(),
+                                 unwrapped) != 0) {
+                    std::cerr << "generated table unwrap failed\n";
+                    return 1;
+                }
+                if (!equal(unwrapped, gen_key)) {
+                    std::cerr << "generated table key mismatch\n";
+                    return 1;
+                }
+                auto tampered_gen = gen_blob;
+                tampered_gen[16] ^= 0x01;
+                uint8_t scratch[32];
+                if (fm_wb_unwrap(&gen_parsed, tampered_gen.data(),
+                                 tampered_gen.size(), scratch) == 0
+                        && equal(scratch, gen_key)) {
+                    std::cerr << "tampered generated blob produced the key\n";
+                    return 1;
+                }
+            }
         }
 
         auto bad_blob = blob;

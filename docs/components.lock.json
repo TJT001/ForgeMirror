@@ -140,6 +140,16 @@
       "license": "BSD-3-Clause",
       "pinned": true,
       "notes": "Chow white-box AES-128 reference used at build time to wrap the content key and export the WBX1 flat table; runtime is a native C port in libshield_boot"
+    },
+    {
+      "id": "BCPROV-JDK15ON",
+      "name": "Bouncy Castle bcprov-jdk15on",
+      "version": "1.61",
+      "scope": "build",
+      "status": "pinned",
+      "license": "MIT-like (Bouncy Castle License)",
+      "pinned": true,
+      "notes": "White-box table generator linear algebra; downloaded from Maven Central with a pinned sha256, cache-first; build-time only, never enters the app"
     }
   ]
 }

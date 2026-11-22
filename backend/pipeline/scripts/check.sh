@@ -18,7 +18,7 @@ if [ -f "$ROOT/backend/tests/vectors/vault/container.fdx" ]; then
     c++ -std=c++17 -O2 -Wall -Wextra -I "$VAULT" \
         "$ROOT/backend/tests/native/vault_test.cpp" \
         "$ROOT"/backend/bin/vault/*.o -o "$ROOT/backend/bin/vault/vault_test"
-    "$ROOT/backend/bin/vault/vault_test" "$ROOT/backend/tests/vectors/vault"
+    "$ROOT/backend/bin/vault/vault_test" "$ROOT/backend/tests/vectors/vault" /tmp/fmvault-gen
 else
     echo "vault vectors missing (JDK not found); skipping native vault test" >&2
 fi

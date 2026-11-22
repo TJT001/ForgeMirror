@@ -68,8 +68,13 @@ assets/shield/wbaes.table  ──┼─> libshield_boot: 解包 -> K_content（�
 
 ## 限制
 
-1. 白盒表是公开固定表，分发在 APK 内；它隐藏的是根密钥的明文存储，不是完整
-   的白盒 AES-GCM。运行时仍会在 native 内存短暂持有 `K_content`。
+1. 白盒表随 APK 分发，拿到表即可离线解出 `WBK1`。已改为**每构建随机生成**
+   （Chow 生成器 + 随机 16 字节表密钥，冷启动约 16 s、热生成约 0.5 s；
+   `--no-whitebox-random-table` 回退随包固定表），跨构建不再共享同一张表，
+   公开固定表的哈希/特征检测也随之失效。生成器构建期依赖 BouncyCastle
+   `bcprov-jdk15on` 1.61（Maven Central 拉取，sha256 固定校验），只进构建
+   工具、不进 App。它隐藏的是根密钥的明文存储，不是完整的白盒 AES-GCM；
+   运行时仍会在 native 内存短暂持有 `K_content`。
 2. native 代码可被 Frida/native hook 或内存 dump 分析；相比 Java 层显著抬高门槛，
    但不是绝对防护。后续可接表随机化、表加密与 `mlock`。
 3. 构建期需要 JDK（`javac`/`java`），用于白盒包裹和 `WBX1` 导出；无 JDK 时

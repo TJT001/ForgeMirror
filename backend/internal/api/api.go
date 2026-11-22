@@ -164,6 +164,7 @@ func (s *Server) createTask(c *gin.Context) {
 		"self_decrypt_text":     true,
 		"detection":             true,
 		"whitebox":              true,
+		"whitebox_random_table": true,
 		"ai_decoy":              false,
 	} {
 		value, err := boolOption(name, fallback)

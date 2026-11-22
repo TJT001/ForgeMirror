@@ -149,6 +149,8 @@ def build_protect_command(task: dict) -> list[str]:
         command.append("--no-detection")
     if _option(task, "whitebox", False):
         command.append("--whitebox-key")
+    if _option(task, "whitebox_random_table", True) is False:
+        command.append("--no-whitebox-random-table")
     if _option(task, "ai_decoy", False):
         command.append("--ai-decoy")
     response = _option(task, "response")

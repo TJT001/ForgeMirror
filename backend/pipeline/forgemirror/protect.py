@@ -25,7 +25,7 @@ from .formats.container import open_container
 from .formats.policy import pack_policy
 from .formats.rules import pack_rules
 from .formats.ai_decoy import build_decoy_jar, merge_jar
-from .formats.whitebox import export_table, wrap as wrap_whitebox
+from .formats.whitebox import export_table, generate_table, wrap as wrap_whitebox
 from .progress import emit as emit_progress
 from .formats.yara_rules import RUNTIME_RULES
 from cryptography.hazmat.primitives import hashes
@@ -125,6 +125,7 @@ class ProtectOptions:
     response: str = "toast"
     max_native_file_mb: int = 128
     whitebox: bool = False
+    whitebox_random_table: bool = True
     ai_decoy: bool = False
     ai_decoy_lexicon: Path | None = None
     progress_file: Path | None = None
@@ -462,10 +463,16 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
         key_asset = "" if options.no_key_asset else "shield/k_content.bin"
         whitebox_entries: dict[str, bytes] = {}
         if options.whitebox and not options.no_key_asset:
-            table_path = Path(__file__).with_name("data") / "wbaes.table"
-            if not table_path.is_file():
-                raise SystemExit("white-box table missing from pipeline data")
-            table = table_path.read_bytes()
+            if options.whitebox_random_table:
+                with tempfile.TemporaryDirectory(prefix="fm-wbtable-") as temporary:
+                    generated = Path(temporary) / "wbaes.generated"
+                    generate_table(generated)
+                    table = generated.read_bytes()
+            else:
+                table_path = Path(__file__).with_name("data") / "wbaes.table"
+                if not table_path.is_file():
+                    raise SystemExit("white-box table missing from pipeline data")
+                table = table_path.read_bytes()
             nonce = os.urandom(12)
             whitebox_entries["assets/shield/wbaes.table"] = export_table(table)
             whitebox_entries["assets/shield/k_content.wb"] = wrap_whitebox(

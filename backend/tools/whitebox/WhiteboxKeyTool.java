@@ -2,6 +2,7 @@ package com.risid.wbaes;
 
 import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -198,7 +199,39 @@ public final class WhiteboxKeyTool {
         }
     }
 
+    private static void generate(byte[] key, String outPath) throws Exception {
+        if (key.length != 16) {
+            throw new IllegalArgumentException("table key must be 16 bytes");
+        }
+        com.risid.wbaes.generator.Generator generator =
+                new com.risid.wbaes.generator.Generator();
+        com.risid.wbaes.generator.ExternalBijections extc =
+                new com.risid.wbaes.generator.ExternalBijections();
+        generator.generateExtEncoding(extc,
+                com.risid.wbaes.generator.Generator.WBAESGEN_EXTGEN_ID);
+        generator.setUseIO04x04Identity(true);
+        generator.setUseIO08x08Identity(true);
+        generator.setUseMB08x08Identity(true);
+        generator.setUseMB32x32Identity(true);
+        generator.generate(true, key, 16, extc);
+        AES table = generator.getAESi();
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        try (java.io.ObjectOutputStream out = new java.io.ObjectOutputStream(
+                buffer)) {
+            out.writeObject(table);
+        }
+        byte[] serialized = buffer.toByteArray();
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(outPath)) {
+            out.write(serialized);
+        }
+        java.util.Arrays.fill(serialized, (byte) 0);
+    }
+
     public static void main(String[] args) throws Exception {
+        if (args.length == 3 && "generate".equals(args[0])) {
+            generate(readKey(args[1]), args[2]);
+            return;
+        }
         if (args.length == 3 && "export".equals(args[0])) {
             export(args[1], args[2]);
             return;
@@ -206,6 +239,7 @@ public final class WhiteboxKeyTool {
         if (args.length != 5) {
             System.err.println(
                     "usage: wrap|unwrap table keyHex|- nonceHex out\n"
+                            + "       generate keyHex|- outTable\n"
                             + "       export table out");
             System.exit(2);
         }
