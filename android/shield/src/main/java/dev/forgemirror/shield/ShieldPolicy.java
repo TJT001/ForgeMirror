@@ -28,9 +28,9 @@ final class ShieldPolicy {
     private ShieldPolicy() {
     }
 
-    static ShieldPolicy load(Context context, ShieldConfig config, byte[] policyKey)
+    static ShieldPolicy load(Context context, ShieldConfig config, byte[] buildId)
             throws Exception {
-        if (config.policy == null || config.policy.isEmpty() || policyKey == null) {
+        if (config.policy == null || config.policy.isEmpty() || buildId == null) {
             return null;
         }
         byte[] pkg;
@@ -62,11 +62,9 @@ final class ShieldPolicy {
         byte[] body = Arrays.copyOfRange(pkg, 0, pkg.length - SIGNATURE_SIZE);
         ShieldSignature.verify(context, config, sigAlg, signature, body);
 
-        byte[] nonce = Arrays.copyOfRange(pkg, 8, 20);
-        byte[] ciphertext = Arrays.copyOfRange(
-                pkg, HEADER_SIZE, pkg.length - SIGNATURE_SIZE);
-        byte[] plaintext = ShieldCrypto.gcmDecrypt(policyKey, nonce, ciphertext,
-                Arrays.copyOfRange(pkg, 0, HEADER_SIZE));
+        byte[] plaintext = ShieldKeyVault.decryptPackage(
+                ShieldKeyVault.DERIVE_POLICY, buildId, pkg,
+                HEADER_SIZE, 8, SIGNATURE_SIZE);
 
         JSONObject json = new JSONObject(
                 new String(plaintext, java.nio.charset.StandardCharsets.UTF_8));

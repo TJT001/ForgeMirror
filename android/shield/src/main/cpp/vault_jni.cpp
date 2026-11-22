@@ -133,6 +133,41 @@ Java_dev_forgemirror_shield_ShieldKeyVault_nativeOpenContainer(
     return result;
 }
 
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_dev_forgemirror_shield_ShieldKeyVault_nativeDecryptPackage(
+        JNIEnv *env, jclass, jint id, jbyteArray build_id, jbyteArray pkg,
+        jint header_size, jint nonce_offset, jint sig_size) {
+    uint8_t *salt = nullptr;
+    uint8_t *bytes = nullptr;
+    jsize salt_len = 0;
+    jsize length = 0;
+    if (!copy_in(env, build_id, &salt, &salt_len) || salt_len != 16
+        || !copy_in(env, pkg, &bytes, &length)) {
+        free(salt);
+        free(bytes);
+        throw_security(env, "bad package arguments");
+        return nullptr;
+    }
+    uint8_t *plain = nullptr;
+    size_t plain_len = 0;
+    int status = fm_vault_decrypt_package(
+            id, salt, bytes, static_cast<size_t>(length),
+            header_size, nonce_offset, sig_size, &plain, &plain_len);
+    free(bytes);
+    free(salt);
+    if (status != 0) {
+        throw_security(env, "package decryption failed");
+        return nullptr;
+    }
+    jbyteArray out = env->NewByteArray(static_cast<jsize>(plain_len));
+    if (out != nullptr) {
+        env->SetByteArrayRegion(out, 0, static_cast<jsize>(plain_len),
+                                reinterpret_cast<jbyte *>(plain));
+    }
+    fm_free_bytes(plain);
+    return out;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_dev_forgemirror_shield_ShieldKeyVault_nativeClear(JNIEnv *, jclass) {
     fm_vault_clear();

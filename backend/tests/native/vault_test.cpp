@@ -95,6 +95,33 @@ int main(int argc, char **argv) {
             return 1;
         }
 
+        auto package = read_file(dir / "package.bin");
+        auto package_plain = read_file(dir / "package-plain.bin");
+        uint8_t *plain = nullptr;
+        size_t plain_len = 0;
+        if (fm_vault_decrypt_package(1, build_id.data(), package.data(),
+                                     package.size(), 24, 8, 64,
+                                     &plain, &plain_len) != 0) {
+            std::cerr << "package decrypt failed\n";
+            return 1;
+        }
+        if (plain_len != package_plain.size() || !equal(plain, package_plain)) {
+            std::cerr << "package plaintext mismatch\n";
+            fm_free_bytes(plain);
+            return 1;
+        }
+        fm_free_bytes(plain);
+
+        auto bad_package = package;
+        bad_package[24 + 10] ^= 0x01;
+        if (fm_vault_decrypt_package(1, build_id.data(), bad_package.data(),
+                                     bad_package.size(), 24, 8, 64,
+                                     &plain, &plain_len) == 0) {
+            std::cerr << "tampered package accepted\n";
+            fm_free_bytes(plain);
+            return 1;
+        }
+
         auto bad_blob = blob;
         bad_blob[16] ^= 0x01;
         if (fm_vault_install(bad_blob.data(), bad_blob.size(),

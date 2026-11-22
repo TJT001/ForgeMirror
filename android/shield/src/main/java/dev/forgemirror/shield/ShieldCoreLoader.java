@@ -18,9 +18,9 @@ final class ShieldCoreLoader {
     private ShieldCoreLoader() {
     }
 
-    static ParcelFileDescriptor open(Context context, ShieldConfig config, byte[] coreKey)
+    static ParcelFileDescriptor open(Context context, ShieldConfig config, byte[] buildId)
             throws Exception {
-        if (config.core == null || config.core.isEmpty() || coreKey == null) {
+        if (config.core == null || config.core.isEmpty() || buildId == null) {
             return null;
         }
         for (String abi : abis(context)) {
@@ -38,10 +38,8 @@ final class ShieldCoreLoader {
                     throw new SecurityException("bad core envelope");
                 }
             }
-            byte[] nonce = java.util.Arrays.copyOfRange(blob, 4, 16);
-            byte[] ciphertext = java.util.Arrays.copyOfRange(blob, 16, blob.length);
-            byte[] aad = java.util.Arrays.copyOfRange(blob, 0, 16);
-            byte[] plaintext = ShieldCrypto.gcmDecrypt(coreKey, nonce, ciphertext, aad);
+            byte[] plaintext = ShieldKeyVault.decryptPackage(
+                    ShieldKeyVault.DERIVE_CORE, buildId, blob, 16, 4, 0);
             FileDescriptor fd = Os.memfd_create("fm-core", 0);
             int offset = 0;
             while (offset < plaintext.length) {

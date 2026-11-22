@@ -342,3 +342,41 @@ void fm_container_free(fm_file *files, int count) {
     }
     free(files);
 }
+
+int fm_vault_decrypt_package(int id, const uint8_t build_id[16],
+                             const uint8_t *pkg, size_t len,
+                             int header_size, int nonce_offset, int sig_size,
+                             uint8_t **out, size_t *out_len) {
+    if (pkg == NULL || out == NULL || out_len == NULL
+        || header_size < 16 || (size_t) header_size >= len
+        || nonce_offset < 0 || (size_t) nonce_offset + 12 > (size_t) header_size
+        || sig_size < 0 || (size_t) sig_size + TAG_SIZE >= len - (size_t) header_size) {
+        return -1;
+    }
+    uint8_t key[32];
+    if (fm_vault_derive(id, build_id, key) != 0) {
+        return -1;
+    }
+    size_t end = len - (size_t) sig_size - TAG_SIZE;
+    size_t ciphertext_len = end - (size_t) header_size;
+    uint8_t *plain = (uint8_t *) malloc(ciphertext_len);
+    if (plain == NULL) {
+        memset(key, 0, sizeof(key));
+        return -1;
+    }
+    int status = fm_gcm_decrypt(key, pkg + nonce_offset, pkg, (size_t) header_size,
+                                pkg + header_size, ciphertext_len,
+                                pkg + end, plain);
+    memset(key, 0, sizeof(key));
+    if (status != 0) {
+        free(plain);
+        return -1;
+    }
+    *out = plain;
+    *out_len = ciphertext_len;
+    return 0;
+}
+
+void fm_free_bytes(uint8_t *buffer) {
+    free(buffer);
+}

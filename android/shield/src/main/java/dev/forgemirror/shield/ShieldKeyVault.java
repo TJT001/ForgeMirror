@@ -49,6 +49,22 @@ final class ShieldKeyVault {
         return files;
     }
 
+    /**
+     * Decrypts a signed package envelope in the native vault. Layout:
+     * header(headerSize, also the AAD) with a 12-byte nonce at nonceOffset,
+     * ciphertext, then sigSize bytes of trailing signature. The tag is the
+     * last 16 bytes of the ciphertext region.
+     */
+    static byte[] decryptPackage(int id, byte[] buildId, byte[] pkg,
+                                 int headerSize, int nonceOffset, int sigSize) {
+        byte[] plain = nativeDecryptPackage(id, buildId, pkg, headerSize,
+                nonceOffset, sigSize);
+        if (plain == null) {
+            throw new SecurityException("package decryption failed");
+        }
+        return plain;
+    }
+
     static void clear() {
         nativeClear();
     }
@@ -57,5 +73,8 @@ final class ShieldKeyVault {
     private static native boolean nativeInstallRaw(byte[] key);
     private static native byte[] nativeDerive(int id, byte[] buildId);
     private static native byte[][] nativeOpenContainer(byte[] container);
+    private static native byte[] nativeDecryptPackage(int id, byte[] buildId,
+                                                       byte[] pkg, int headerSize,
+                                                       int nonceOffset, int sigSize);
     private static native void nativeClear();
 }

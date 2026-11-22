@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -58,6 +59,17 @@ def main() -> int:
         derived = HKDF(algorithm=hashes.SHA256(), length=32,
                        salt=BUILD_ID, info=label).derive(KEY)
         (OUT / f"derive-{ident}.bin").write_bytes(derived)
+    package_plain = bytes((i * 5 + 11) & 0xFF for i in range(512))
+    policy_key = HKDF(algorithm=hashes.SHA256(), length=32,
+                      salt=BUILD_ID, info=LABELS[1]).derive(KEY)
+    package_nonce = bytes(range(12))
+    header = bytearray(24)
+    header[0:4] = b"TST1"
+    header[8:20] = package_nonce
+    package = bytes(header) + AESGCM(policy_key).encrypt(
+        package_nonce, package_plain, bytes(header)) + b"\xAA" * 64
+    (OUT / "package.bin").write_bytes(package)
+    (OUT / "package-plain.bin").write_bytes(package_plain)
     (OUT / "manifest.json").write_text(json.dumps({
         "files": [name for name, _ in FILES],
         "derive_ids": sorted(LABELS),

@@ -52,7 +52,7 @@ final class ShieldRules {
         return yidun;
     }
 
-    static ShieldRules load(Context context, ShieldConfig config, byte[] rulesKey) {
+    static ShieldRules load(Context context, ShieldConfig config, byte[] buildId) {
         if (config.rules == null || config.rules.isEmpty()) {
             return null;
         }
@@ -60,7 +60,7 @@ final class ShieldRules {
         if (remote.isFile()) {
             try {
                 byte[] pkg = readFile(remote);
-                ShieldRules loaded = parsePackage(context, config, rulesKey, pkg);
+                ShieldRules loaded = parsePackage(context, config, buildId, pkg);
                 Log.i(TAG, "loaded remote rules version=" + loaded.version);
                 return loaded;
             } catch (Exception error) {
@@ -69,7 +69,7 @@ final class ShieldRules {
         }
         try {
             byte[] pkg = ShieldAssets.read(context, config.rules);
-            return parsePackage(context, config, rulesKey, pkg);
+            return parsePackage(context, config, buildId, pkg);
         } catch (Exception error) {
             Log.w(TAG, "rules unavailable: " + error);
             return null;
@@ -77,7 +77,7 @@ final class ShieldRules {
     }
 
     static ShieldRules parsePackage(Context context, ShieldConfig config,
-                                    byte[] rulesKey, byte[] pkg) throws Exception {
+                                    byte[] buildId, byte[] pkg) throws Exception {
         {
             if (pkg == null) {
                 throw new SecurityException("empty rule package");
@@ -92,7 +92,6 @@ final class ShieldRules {
             int version = Short.toUnsignedInt(header.getShort(4));
             int cipher = header.get(8) & 0xff;
             int sigAlg = header.get(9) & 0xff;
-            byte[] nonce = Arrays.copyOfRange(pkg, 10, 22);
             int plaintextLen = header.getInt(22);
             if (version != 1 || cipher != 1) {
                 throw new SecurityException("unsupported rule package");
@@ -105,10 +104,9 @@ final class ShieldRules {
             byte[] body = Arrays.copyOfRange(pkg, 0, pkg.length - SIGNATURE_SIZE);
             ShieldSignature.verify(context, config, sigAlg, signature, body);
 
-            byte[] ciphertext = Arrays.copyOfRange(
-                    pkg, HEADER_SIZE, pkg.length - SIGNATURE_SIZE);
-            byte[] plaintext = ShieldCrypto.gcmDecrypt(rulesKey, nonce, ciphertext,
-                    Arrays.copyOfRange(pkg, 0, HEADER_SIZE));
+            byte[] plaintext = ShieldKeyVault.decryptPackage(
+                    ShieldKeyVault.DERIVE_RULES, buildId, pkg,
+                    HEADER_SIZE, 10, SIGNATURE_SIZE);
             JSONObject json = new JSONObject(
                     new String(plaintext, StandardCharsets.UTF_8));
             if (!"forgemirror.rules/1".equals(json.optString("schema"))) {

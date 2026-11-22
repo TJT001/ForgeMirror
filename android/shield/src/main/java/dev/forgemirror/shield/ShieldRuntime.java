@@ -80,7 +80,7 @@ public final class ShieldRuntime {
             // P1-B uses a local developer key path; key service is P2.
             state = STATE_KEY_READY;
             byte[] buildId = ShieldPolicy.uuidBytes(config.buildId);
-            byte[] coreKey = null;
+            boolean vaultReady = false;
 
             if ((config.key != null && !config.key.isEmpty())
                     || (config.authUrl != null && !config.authUrl.isEmpty())) {
@@ -106,21 +106,18 @@ public final class ShieldRuntime {
                     }
                     Log.i(TAG, "content key obtained from dev authorization");
                 }
-                byte[] policyKey = ShieldKeyVault.derive(ShieldKeyVault.DERIVE_POLICY, buildId);
+                vaultReady = true;
                 try {
-                    policy = ShieldPolicy.load(context, config, policyKey);
+                    policy = ShieldPolicy.load(context, config, buildId);
                 } catch (Exception error) {
                     fail("policy load failed: " + error);
                     return state;
-                } finally {
-                    java.util.Arrays.fill(policyKey, (byte) 0);
                 }
                 fileKey = ShieldKeyVault.derive(ShieldKeyVault.DERIVE_FILE, buildId);
                 nativeKey = ShieldKeyVault.derive(ShieldKeyVault.DERIVE_NATIVE, buildId);
-                byte[] rulesKey = ShieldKeyVault.derive(ShieldKeyVault.DERIVE_RULES, buildId);
                 // Load rules before native file hooks so the provenance log is
                 // visible even when the hooks intercept logging writes.
-                rules = ShieldRules.load(context, config, rulesKey);
+                rules = ShieldRules.load(context, config, buildId);
                 ShieldDetect.setYidunSignatures(
                         rules == null ? null : rules.yidunSignatures());
                 ShieldNativeIo.configure(context, config.maxNativeFileMb);
@@ -135,7 +132,7 @@ public final class ShieldRuntime {
                 ShieldEvents.init(context, config, fileKey);
                 ShieldDetectionBridge.register(context);
                 ShieldDetect.start(context, config);
-                ShieldRuleUpdater.start(context, config, rulesKey);
+                ShieldRuleUpdater.start(context, config, buildId);
                 ShieldFileWatch.start(context, config);
                 ShieldSelfCheck.start(context, config);
                 byte[] container = ShieldAssets.read(context, config.container);
@@ -154,20 +151,15 @@ public final class ShieldRuntime {
                 decryptMs = (SystemClock.elapsedRealtimeNanos() - started) / 1_000_000L;
                 Log.i(TAG, "dex loaded count=" + dexCount + " decryptMs=" + decryptMs
                         + " pssKb=" + pssKb() + " " + ShieldArt.describe());
-                if (config.core != null && !config.core.isEmpty()) {
-                    coreKey = ShieldKeyVault.derive(ShieldKeyVault.DERIVE_CORE, buildId);
-                }
             }
 
             ParcelFileDescriptor coreDescriptor = null;
-            if (config.core != null && !config.core.isEmpty() && coreKey != null) {
+            if (config.core != null && !config.core.isEmpty() && vaultReady) {
                 try {
-                    coreDescriptor = ShieldCoreLoader.open(context, config, coreKey);
+                    coreDescriptor = ShieldCoreLoader.open(context, config, buildId);
                     Log.i(TAG, "encrypted core opened fd=" + coreDescriptor.getFd());
                 } catch (Throwable error) {
                     Log.w(TAG, "encrypted core unavailable: " + error);
-                } finally {
-                    java.util.Arrays.fill(coreKey, (byte) 0);
                 }
             }
             int status = coreDescriptor != null

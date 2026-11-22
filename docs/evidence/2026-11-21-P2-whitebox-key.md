@@ -41,8 +41,10 @@ assets/shield/wbaes.table  ──┼─> libshield_boot: 解包 -> K_content（�
                               └─> FDX2 解密 -> 明文 DEX 交给 ART
 ```
 
-`K_content` 只在 native 全局缓冲区中存在；Java 侧只持有派生密钥。容器解密
-的完整性由 GCM tag、逐文件 SHA-256 与 TOC 边界检查共同保证。
+`K_content` 只在 native 全局缓冲区中存在；容器、policy（SPK1）、rules
+（PKR1）与 core（FMC1）的信封解密全部在 native 内完成，policy/rules/core
+的派生密钥不再进入 Java。Java 仅持有文件层与 native 层两把派生密钥。
+完整性由 GCM tag、逐文件 SHA-256 与 TOC 边界检查共同保证。
 
 ## 验证
 
@@ -74,4 +76,5 @@ assets/shield/wbaes.table  ──┼─> libshield_boot: 解包 -> K_content（�
    白盒选项失败，不会退回明文。
 4. debug 变体 NDK 默认 `-O0`，`shield_boot` 显式加 `-O2`；否则纯 C 实现在
    设备上会慢约 40 倍。
-5. `ShieldCrypto` 仍负责 policy/rules/core 的 GCM 解密，但只接收派生密钥。
+5. 文件层（FMF1、chunk store、随机访问、SharedPreferences）仍在 Java 用
+   fileKey 解密；该密钥由文件栈常驻使用，下沉需重构整条 I/O 链路。

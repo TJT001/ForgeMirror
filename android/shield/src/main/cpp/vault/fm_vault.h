@@ -33,6 +33,14 @@ int fm_container_open(const uint8_t *container, size_t len,
                       fm_file **files, int *count);
 void fm_container_free(fm_file *files, int count);
 
+/* Decrypts a signed package envelope (SPK1/PKR1/FMC1 layout) with the key
+ * derived for the given id. The caller frees *out with fm_free_bytes. */
+int fm_vault_decrypt_package(int id, const uint8_t build_id[16],
+                             const uint8_t *pkg, size_t len,
+                             int header_size, int nonce_offset, int sig_size,
+                             uint8_t **out, size_t *out_len);
+void fm_free_bytes(uint8_t *buffer);
+
 #ifdef __cplusplus
 }
 #endif
