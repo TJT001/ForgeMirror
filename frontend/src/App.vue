@@ -594,15 +594,15 @@ async function cancel() {
                 <span>Shell 版本</span>
                 <input v-model="shellVersion" type="text" />
               </label>
-              <label class="field wide">
+              <label class="field full">
                 <span>授权服务 URL</span>
                 <input v-model="authUrl" type="url" placeholder="https://auth.example" />
               </label>
-              <label class="field wide">
+              <label class="field full">
                 <span>事件服务 URL</span>
                 <input v-model="eventUrl" type="url" placeholder="https://events.example" />
               </label>
-              <label class="field">
+              <label class="field full">
                 <span>事件 Token</span>
                 <input v-model="eventToken" type="password" autocomplete="off" />
               </label>
@@ -672,16 +672,16 @@ async function cancel() {
 
 :root {
   color-scheme: light;
-  --shell: #d8ddd9;
-  --surface: #eef1ec;
-  --surface-raised: #f6f7f2;
-  --ink: #16211f;
-  --ink-soft: #4b5853;
-  --rule: #a9b3ac;
-  --rule-dark: #7f8c85;
-  --oxide: #b0472f;
-  --oxide-dark: #85311f;
-  --patina: #24685a;
+  --shell: #e3e6e1;
+  --surface: #eef0ec;
+  --surface-raised: #f7f8f5;
+  --ink: #1a2320;
+  --ink-soft: #55615c;
+  --rule: #b7bfb9;
+  --rule-dark: #8a958f;
+  --oxide: #a8432c;
+  --oxide-dark: #7f2f1e;
+  --patina: #256b5c;
   --brass: #9a7540;
   --rail: #17211f;
   --rail-soft: #27332f;
@@ -700,8 +700,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .app {
   min-height: 100vh;
   background:
-    radial-gradient(900px 520px at 92% -8%, rgb(176 71 47 / 10%), transparent 60%),
-    linear-gradient(90deg, transparent 49.85%, rgb(22 33 31 / 5%) 50%, transparent 50.15%),
+    radial-gradient(880px 500px at 92% -8%, rgb(168 67 44 / 7%), transparent 60%),
     var(--shell);
 }
 .topbar {
@@ -816,24 +815,31 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .ledger-msg { color: #aab8b1; overflow-wrap: anywhere; }
 .rail-empty { margin: 0; color: #718079; font-size: 11px; line-height: 1.6; }
 
-.stage { padding: 36px 42px 80px; min-width: 0; }
-.hero { max-width: 720px; margin-bottom: 32px; }
-.hero h2 {
-  margin: 0 0 9px;
-  font-size: clamp(24px, 2.4vw, 32px);
-  line-height: 1.08;
-  letter-spacing: -0.032em;
-  font-weight: 600;
+.stage { padding: 44px 48px 96px; min-width: 0; }
+.hero {
+  display: flex;
+  align-items: baseline;
+  gap: 20px;
+  max-width: 920px;
+  margin-bottom: 26px;
 }
-.hero p { margin: 0; max-width: 62ch; color: var(--ink-soft); font-size: 14px; line-height: 1.7; }
+.hero h2 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.2;
+  letter-spacing: -0.03em;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.hero p { margin: 0; max-width: 64ch; color: var(--ink-soft); font-size: 13px; line-height: 1.55; }
 .block {
-  padding: 26px 0 34px;
+  padding: 32px 0 42px;
   border-top: 2px solid var(--ink);
 }
-.block-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 30px; margin-bottom: 22px; }
+.block-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 30px; margin-bottom: 26px; }
 .block-head h3 { margin: 0; font-size: 20px; letter-spacing: -0.03em; font-weight: 600; }
 .block-head p { max-width: 58ch; margin: 0; color: var(--ink-soft); font-size: 12px; line-height: 1.65; }
-.dropgrid { display: grid; grid-template-columns: 1.15fr 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+.dropgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
 .drop {
   position: relative;
   min-height: 118px;
@@ -847,6 +853,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   transition: border-color 120ms ease, background 120ms ease;
 }
 .drop:hover, .drop:focus-within { border-color: var(--ink); background: var(--surface-raised); }
+.drop:focus-within { outline: 2px solid var(--oxide); outline-offset: 2px; }
 .drop.active { border-color: var(--oxide); background: rgb(176 71 47 / 6%); }
 .drop.filled { border-style: solid; border-color: var(--patina); }
 .drop.disabled { opacity: 0.48; cursor: not-allowed; }
@@ -859,6 +866,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .field-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 18px; }
 .field { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
 .field.wide { grid-column: span 2; }
+.field.full { grid-column: 1 / -1; }
 .field > span { color: var(--ink-soft); font-size: 11px; }
 .field small { color: var(--ink-soft); font-size: 10px; line-height: 1.45; }
 .field input, .field select, .event-tools select {
@@ -879,15 +887,16 @@ button, a { -webkit-tap-highlight-color: transparent; }
   background-size: 5px 5px, 5px 5px;
   background-repeat: no-repeat;
 }
-.field input:focus, .field select:focus, .event-tools select:focus {
+.field input:focus-visible, .field select:focus-visible, .event-tools select:focus-visible {
   border-color: var(--oxide);
-  box-shadow: 0 0 0 2px rgb(176 71 47 / 14%);
+  outline: 3px solid rgb(176 71 47 / 50%);
+  outline-offset: 2px;
 }
 .number-wrap { display: flex; align-items: center; gap: 8px; }
 .number-wrap input { flex: 1; }
 .number-wrap span { color: var(--ink-soft); font-family: var(--mono); font-size: 11px; }
 
-.matrix { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 20px; }
+.matrix { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; margin-bottom: 20px; }
 .toggle {
   position: relative;
   display: grid;
@@ -987,7 +996,8 @@ td.mono { font-family: var(--mono); font-size: 10px; color: var(--ink-soft); }
   .topbar-meta { font-size: 10px; }
   .rail { display: block; padding: 24px 20px; }
   .stage { padding: 26px 18px 60px; }
-  .hero h2 { font-size: 27px; }
+  .hero { display: block; }
+  .hero h2 { white-space: normal; margin-bottom: 8px; font-size: 22px; }
   .dropgrid, .field-grid, .matrix { grid-template-columns: 1fr; }
   .field.wide { grid-column: auto; }
   .block-head { display: block; }
@@ -998,6 +1008,12 @@ td.mono { font-family: var(--mono); font-size: 10px; color: var(--ink-soft); }
   .primary, .secondary { width: 100%; }
   .table-wrap { margin-right: -18px; margin-left: -18px; }
 }
+@media (pointer: coarse) {
+  .field input, .field select { height: 48px; }
+  .event-tools select, .quiet { height: 44px; }
+  .toggle { min-height: 60px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
