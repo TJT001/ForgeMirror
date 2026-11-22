@@ -636,7 +636,7 @@ async function cancel() {
               <button class="quiet" type="button" @click="loadSecurityEvents">刷新</button>
             </div>
           </div>
-          <div class="table-wrap">
+          <div class="table-wrap" tabindex="0" role="region" aria-label="安全风控事件列表">
             <table>
               <thead>
                 <tr>
@@ -649,11 +649,11 @@ async function cancel() {
               </thead>
               <tbody>
                 <tr v-for="item in securityEvents" :key="item.id">
-                  <td class="mono">{{ item.created_at }}</td>
-                  <td>{{ item.app_package }}</td>
-                  <td><span class="tag">{{ item.kind }}</span></td>
-                  <td class="mono">{{ item.rule_id || '—' }}</td>
-                  <td class="num mono">{{ item.confidence.toFixed(2) }}</td>
+                  <td class="mono" data-label="时间">{{ item.created_at }}</td>
+                  <td data-label="应用">{{ item.app_package }}</td>
+                  <td data-label="类型"><span class="tag">{{ item.kind }}</span></td>
+                  <td class="mono" data-label="规则">{{ item.rule_id || '—' }}</td>
+                  <td class="num mono" data-label="置信度">{{ item.confidence.toFixed(2) }}</td>
                 </tr>
                 <tr v-if="securityEvents.length === 0">
                   <td colspan="5" class="empty">暂无安全风控事件</td>
@@ -693,7 +693,11 @@ async function cancel() {
   color: var(--ink);
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--shell); }
+html { scroll-padding-top: 68px; }
+body { margin: 0; background: var(--shell); overflow-wrap: break-word; }
+h1, h2, h3 { text-wrap: balance; }
+p, li { text-wrap: pretty; }
+a, code { overflow-wrap: anywhere; }
 button, input, select { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 
@@ -962,7 +966,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .event-tools select { width: 150px; height: 34px; font-size: 11px; }
 .quiet { height: 34px; padding: 0 12px; background: transparent; border: 1px solid var(--rule); font-size: 11px; }
 .quiet:hover { border-color: var(--ink); }
-.table-wrap { max-height: 390px; overflow: auto; border-top: 1px solid var(--rule); }
+.table-wrap { max-height: 390px; overflow: auto; border-top: 1px solid var(--rule); container-type: inline-size; }
 table { width: 100%; border-collapse: collapse; font-size: 11px; }
 th {
   position: sticky; top: 0; z-index: 1;
@@ -976,6 +980,17 @@ td.mono { font-family: var(--mono); font-size: 10px; color: var(--ink-soft); }
 .tag { display: inline-block; padding: 2px 6px; border: 1px solid var(--rule); font-family: var(--mono); font-size: 9px; }
 .empty { padding: 30px 8px; text-align: center; color: var(--ink-soft); }
 .download-inline { border-color: var(--patina); color: var(--patina); }
+
+@container (max-width: 600px) {
+  .table-wrap table, .table-wrap thead, .table-wrap tbody, .table-wrap tr,
+  .table-wrap th, .table-wrap td { display: block; }
+  .table-wrap thead { display: none; }
+  .table-wrap tbody tr { border: 1px solid var(--rule); border-radius: 2px; margin: 10px 0; padding: 8px 10px; }
+  .table-wrap td { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; border: 0; padding: 4px 0; }
+  .table-wrap td::before { content: attr(data-label) " "; color: var(--ink-soft); font-size: 10px; }
+  .table-wrap td.num { text-align: left; }
+  .table-wrap td.empty { display: block; padding: 20px 8px; }
+}
 
 @media (max-width: 1080px) {
   .workspace { grid-template-columns: 1fr; background: none; }
