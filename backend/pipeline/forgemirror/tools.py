@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -107,28 +108,39 @@ class AndroidTools:
             ]
         )
 
-    def debug_signer_sha256(self) -> str | None:
-        keystore = Path.home() / ".android" / "debug.keystore"
-        if not keystore.is_file():
-            return None
+    def _keytool(self) -> str | None:
         keytool = shutil.which("keytool")
         if keytool is None:
             java_home = os.environ.get("JAVA_HOME")
             if java_home:
                 candidate = Path(java_home) / "bin" / "keytool"
                 if candidate.is_file():
-                    keytool = str(candidate)
+                    return str(candidate)
+        return keytool
+
+    def keystore_sha256(self, keystore: Path, alias: str,
+                        storepass: str) -> str | None:
+        if not keystore.is_file():
+            return None
+        keytool = self._keytool()
         if keytool is None:
             return None
         try:
             output = self._run([
                 keytool, "-list", "-v", "-keystore", str(keystore),
-                "-storepass", "android", "-alias", "androiddebugkey",
+                "-storepass", storepass, "-alias", alias,
             ])
         except ToolError:
             return None
         match = re.search(r"SHA256:\s*([0-9a-fA-F:]+)", output)
         return match.group(1).replace(":", "").lower() if match else None
+
+    def debug_signer_sha256(self) -> str | None:
+        return self.keystore_sha256(
+            Path.home() / ".android" / "debug.keystore",
+            "androiddebugkey",
+            "android",
+        )
 
     def cert_sha256(self, apk: Path) -> str | None:
         try:
@@ -174,6 +186,51 @@ class AndroidTools:
                 str(apk_in),
             ]
         )
+
+    def sign_uber(self, apk_in: Path, apk_out: Path, jar: Path,
+                  keystore: Path | None = None, alias: str | None = None,
+                  storepass: str | None = None,
+                  keypass: str | None = None) -> None:
+        if not jar.is_file():
+            raise ToolError(f"uber-apk-signer jar not found at {jar}")
+        with tempfile.TemporaryDirectory(prefix="fm-uber-") as tmp:
+            out_dir = Path(tmp) / "out"
+            out_dir.mkdir()
+            command = [
+                self._java(), "-jar", str(jar),
+                "--apks", str(apk_in),
+                "--out", str(out_dir),
+                "--skipZipAlign",
+                "--allowResign",
+            ]
+            if keystore is None:
+                debug_keystore = Path.home() / ".android" / "debug.keystore"
+                if not debug_keystore.is_file():
+                    raise ToolError(
+                        f"debug keystore not found at {debug_keystore}"
+                    )
+                command += ["--ksDebug", str(debug_keystore)]
+            else:
+                if not keystore.is_file():
+                    raise ToolError(f"keystore not found at {keystore}")
+                if not alias:
+                    raise ToolError("keystore alias required with --keystore")
+                if storepass is None:
+                    raise ToolError("keystore password required with --keystore")
+                command += [
+                    "--ks", str(keystore),
+                    "--ksAlias", alias,
+                    "--ksPass", storepass,
+                    "--ksKeyPass", keypass or storepass,
+                ]
+            self._run(command)
+            produced = sorted(out_dir.glob("*.apk"))
+            if len(produced) != 1:
+                raise ToolError(
+                    f"uber-apk-signer produced {len(produced)} apks "
+                    f"in {out_dir}"
+                )
+            shutil.copyfile(produced[0], apk_out)
 
     def verify(self, apk: Path) -> str:
         return self._run([str(self.apksigner), "verify", "--print-certs", str(apk)])

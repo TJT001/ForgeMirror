@@ -108,6 +108,11 @@ class ProtectOptions:
     aar: Path
     profile: str = "basic"
     signing_mode: str = "customer_local"
+    uber_apk_signer: Path | None = None
+    keystore: Path | None = None
+    ks_alias: str = "androiddebugkey"
+    ks_pass: str | None = None
+    key_pass: str | None = None
     auth_url: str = ""
     event_url: str = ""
     event_token: str = "dev-client-token"
@@ -212,6 +217,17 @@ def _encrypt_core(data: bytes, key: bytes) -> bytes:
 
 
 def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
+    if options.signing_mode not in ("hsm", "customer_local", "uber"):
+        raise SystemExit(f"unsupported signing mode: {options.signing_mode}")
+    if options.signing_mode == "uber":
+        if options.uber_apk_signer is None:
+            raise SystemExit("--signing-mode uber requires --uber-apk-signer")
+        if not options.uber_apk_signer.is_file():
+            raise SystemExit(
+                f"uber-apk-signer jar not found: {options.uber_apk_signer}"
+            )
+        if options.keystore is not None and options.ks_pass is None:
+            raise SystemExit("--keystore requires --ks-pass")
     if not options.aar.is_file():
         raise SystemExit(f"shield AAR not found: {options.aar}")
     k_content = options.key_file.read_bytes()
@@ -287,6 +303,13 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
     if options.signing_mode == "hsm":
         signer_cert = tools.debug_signer_sha256()
         cert = signer_cert or input_cert
+    elif options.signing_mode == "uber":
+        if options.keystore is None:
+            cert = tools.debug_signer_sha256() or ""
+        else:
+            cert = tools.keystore_sha256(
+                options.keystore, options.ks_alias, options.ks_pass or ""
+            ) or ""
     else:
         cert = ""
     signing_key = load_or_create_key(options.key_dir, options.alg)
@@ -552,7 +575,14 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
             else:
                 aligned_split = tmp / f"split-{index}-aligned.apk"
                 tools.align_apk(staged, aligned_split)
-                tools.sign_debug(aligned_split, target)
+                if options.signing_mode == "uber":
+                    tools.sign_uber(
+                        aligned_split, target, options.uber_apk_signer,
+                        options.keystore, options.ks_alias,
+                        options.ks_pass, options.key_pass,
+                    )
+                else:
+                    tools.sign_debug(aligned_split, target)
             split_outputs.append({
                 "name": split_name,
                 "file": target.name,
@@ -602,7 +632,14 @@ def protect(options: ProtectOptions, tools: AndroidTools) -> dict:
         else:
             aligned = tmp / "aligned.apk"
             tools.align_apk(with_manifest, aligned)
-            tools.sign_debug(aligned, options.out)
+            if options.signing_mode == "uber":
+                tools.sign_uber(
+                    aligned, options.out, options.uber_apk_signer,
+                    options.keystore, options.ks_alias,
+                    options.ks_pass, options.key_pass,
+                )
+            else:
+                tools.sign_debug(aligned, options.out)
             signed = True
         emit_progress(options.progress_file, "s7", "done", 88,
                       "签名完成" if signed else "对齐完成")

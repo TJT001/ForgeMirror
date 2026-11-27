@@ -239,6 +239,17 @@ def protect_apk(
         None, "--key-file", exists=True, dir_okay=False, readable=True,
         help="Reuse an existing 32-byte content key for reproducible builds.",
     ),
+    uber_apk_signer: Path | None = typer.Option(
+        None, "--uber-apk-signer", exists=True, dir_okay=False, readable=True,
+        help="uber-apk-signer.jar for --signing-mode uber.",
+    ),
+    keystore: Path | None = typer.Option(
+        None, "--keystore", exists=True, dir_okay=False, readable=True,
+        help="Keystore for --signing-mode uber; defaults to the debug keystore.",
+    ),
+    ks_alias: str = typer.Option("androiddebugkey", "--ks-alias"),
+    ks_pass: str | None = typer.Option(None, "--ks-pass"),
+    key_pass: str | None = typer.Option(None, "--key-pass"),
     alg: str = typer.Option("ecdsa-p256-sha256", "--alg"),
     shell_version: str = typer.Option("0.1.0", "--shell-version"),
     sdk_root: Path | None = typer.Option(None, "--sdk-root"),
@@ -262,6 +273,17 @@ def protect_apk(
         raise typer.Exit(2)
     if response not in ("log", "toast", "degrade", "block"):
         typer.echo(f"invalid response mode: {response}", err=True)
+        raise typer.Exit(2)
+    if signing_mode == "uber" and uber_apk_signer is None:
+        typer.echo("--uber-apk-signer is required for --signing-mode uber",
+                   err=True)
+        raise typer.Exit(2)
+    if uber_apk_signer is not None and signing_mode != "uber":
+        typer.echo("--uber-apk-signer only applies to --signing-mode uber",
+                   err=True)
+        raise typer.Exit(2)
+    if signing_mode == "uber" and keystore is not None and ks_pass is None:
+        typer.echo("--keystore requires --ks-pass", err=True)
         raise typer.Exit(2)
 
     tools = _discover(sdk_root, build_tools)
@@ -333,6 +355,11 @@ def protect_apk(
                 aar=shield_aar,
                 profile=profile,
                 signing_mode=signing_mode,
+                uber_apk_signer=uber_apk_signer,
+                keystore=keystore,
+                ks_alias=ks_alias,
+                ks_pass=ks_pass,
+                key_pass=key_pass,
                 auth_url=auth_url,
                 event_url=event_url,
                 event_token=event_token,

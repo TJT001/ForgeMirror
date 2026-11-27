@@ -150,6 +150,16 @@
       "license": "MIT-like (Bouncy Castle License)",
       "pinned": true,
       "notes": "White-box table generator linear algebra; downloaded from Maven Central with a pinned sha256, cache-first; build-time only, never enters the app"
+    },
+    {
+      "id": "TOOL-UBER-APK-SIGNER",
+      "name": "uber-apk-signer",
+      "version": "1.3.0",
+      "scope": "build",
+      "status": "candidate",
+      "license": "Apache-2.0",
+      "pinned": false,
+      "notes": "Optional external JAR for --signing-mode uber; v1.3.0 SHA-256 e1299fd6fcf4da527dd53735b56127e8ea922a321128123b9c32d619bba1d835; not vendored, keep out of client artifacts and pin the release checksum before production"
     }
   ]
 }

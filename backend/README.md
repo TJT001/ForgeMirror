@@ -29,6 +29,23 @@ go run ./cmd/api
 
 规则包上传后落在 `DATA_DIR/rules/<package>/<version>.pkr`；客户端通过 `GET /api/v1/rules/latest` 按版本门控拉取。
 
+## 签名
+
+`customer_local` 只对齐不签名；`hsm` 使用本地 debug keystore 走 apksigner。使用
+uber-apk-signer 签名时：
+
+```bash
+python3 -m forgemirror protect --apk app.apk --out out/ \
+  --signing-mode uber \
+  --uber-apk-signer /path/uber-apk-signer-1.3.0.jar \
+  [--keystore release.jks --ks-alias my_alias --ks-pass '...' --key-pass '...']
+```
+
+未提供 `--keystore` 时使用 `~/.android/debug.keystore`。签名前流水线已执行
+`zipalign -P 16`，uber 调用带 `--skipZipAlign`，不会把 16 KB 对齐改回 4 字节；
+`--allowResign` 用于清除输入 APK 残留的旧签名。生产发布请使用正式 keystore/HSM，
+不要使用 debug key。
+
 ## 加固任务参数
 
 `POST /api/v1/tasks` 为 multipart：`file`（.apk/.aab）、可选多个 `splits` 和

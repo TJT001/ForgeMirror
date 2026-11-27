@@ -19,7 +19,7 @@ from .tools import AndroidTools, ToolError
 
 MIN_SDK = 26
 PROFILES = ("basic", "enhanced", "financial")
-SIGNING_MODES = ("hsm", "customer_local")
+SIGNING_MODES = ("hsm", "customer_local", "uber")
 
 
 def run_intake(

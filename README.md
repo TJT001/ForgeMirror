@@ -110,6 +110,7 @@ backend/pipeline/scripts/check.sh
 - [研究证据：参照样本 B（网易易盾 libnesec）](docs/research/libnesec_易盾加固还原.md)
   - [检测链路实测](docs/research/libnesec_检测实测.md)、[证书链分析](docs/research/libnesec_证书链分析.md)、[VM 还原](docs/research/libnesec_VM还原.md)、[函数分类](docs/research/libnesec_函数分类.md)
 - [规则包格式](docs/formats/rules-v1.md)
+- [uber-apk-signer 签名](docs/evidence/2026-11-27-signing-uber.md)
 - [16 KB 页适配](docs/evidence/2026-11-21-P2-16kb.md)
 - [split APK / AAB](docs/evidence/2026-11-21-P2-split-aab.md)
 - [自研 loader 动态 TLS](docs/evidence/2026-11-21-P2-tls-relocation.md)
